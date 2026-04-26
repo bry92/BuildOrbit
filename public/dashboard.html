@@ -1,0 +1,2576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Command Center — BuildOrbit</title>
+    <link rel="stylesheet" href="/css/buildorbit.css?v=20260426e">
+</head>
+<body class="page-dashboard">
+
+    <!-- ── Top Nav ──────────────────────────────────────────── -->
+    <nav class="topnav">
+        <div class="topnav-left">
+            <a href="/" class="logo">
+                <div class="logo-dot"></div>
+                BuildOrbit
+            </a>
+            <div class="nav-divider"></div>
+            <span class="nav-title">Command Center</span>
+        </div>
+        <div class="topnav-right">
+            <a href="/trace" onmouseover="this.style.color='var(--accent)';this.style.borderColor='rgba(20,184,166,.3)'" onmouseout="this.style.color='var(--text-dim)';this.style.borderColor='var(--border)'">🔍 Traces</a>
+            <div class="queue-badge" id="queue-badge">
+                <div class="q-dot"></div>
+                <span id="queue-label">loading...</span>
+            </div>
+            <button class="run-pipeline-btn" onclick="openRunModal()">
+                + Start build
+            </button>
+            <!-- Plan status + credits (populated by loadBillingStatus()) -->
+            <div id="plan-badge" style="display:none">
+                <span id="plan-credits-badge"></span>
+                <a id="upgrade-btn" href="#" onclick="startUpgrade(event)" style="display:none" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Upgrade ↑</a>
+                <a id="manage-sub-btn" href="#" onclick="manageSubscription(event)" style="display:none" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-dim)'">Manage plan</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ── Upgrade Modal ──────────────────────────────────────── -->
+    <div class="modal-overlay" id="upgrade-modal" onclick="closeUpgradeModalIfOutside(event)">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>BuildOrbit Pro</h2>
+                <button class="modal-close" onclick="closeUpgradeModal()">✕</button>
+            </div>
+            <div>
+                <div>$49<span>/month</span></div>
+                <p>Daily autonomous build cycles that ship features while you sleep.</p>
+                <ul>
+                    <li><span>✓</span> Daily autonomous build cycles</li>
+                    <li><span>✓</span> <strong>10 bonus credits</strong> on signup</li>
+                    <li><span>✓</span> 5 renewal credits every month</li>
+                    <li><span>✓</span> Plan, build, verify, deploy — fully automated</li>
+                </ul>
+                <button id="upgrade-checkout-btn" onclick="redirectToCheckout()" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                    Subscribe for $49/month →
+                </button>
+                <p>Secured by Stripe · Cancel any time</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Analytics Stats Bar ───────────────────────────────── -->
+    <div id="analytics-bar" style="display:none">
+        <span id="stat-builds-today">
+            <span>●</span> — builds today
+        </span>
+        <span>|</span>
+        <span id="stat-success-rate">
+            <span>—</span> success rate
+        </span>
+        <span>|</span>
+        <span id="stat-avg-duration">
+            <span>—</span> avg build time
+        </span>
+        <span>|</span>
+        <span id="stat-active-users">
+            <span>—</span> active users (7d)
+        </span>
+    </div>
+
+    <!-- ── Layout ────────────────────────────────────────────── -->
+    <div class="layout">
+
+        <!-- ── Run History Panel ──────────────────────────────── -->
+        <aside class="run-history">
+            <div class="run-history-header">
+                <h2>Run History</h2>
+                <span class="run-count" id="run-count">0 runs</span>
+            </div>
+            <!-- Constraint health summary (loaded async) -->
+            <div class="constraint-health-bar" id="constraint-health-bar" style="display:none">
+                <div class="constraint-health-title">
+                    <span>Intent Classes</span>
+                    <span id="constraint-health-viol-rate"></span>
+                </div>
+                <div class="constraint-health-pills" id="constraint-health-pills"></div>
+            </div>
+            <div class="runs-list" id="runs-list">
+                <div class="empty-runs">
+                    <span>🛸</span>
+                    Loading runs...
+                </div>
+            </div>
+        </aside>
+
+        <!-- ── Main Panel ─────────────────────────────────────── -->
+        <div class="main-panel">
+
+            <!-- Tab bar -->
+            <div class="panel-tabs">
+                <button class="panel-tab active" data-tab="live" onclick="switchPanelTab('live')">Live View</button>
+                <button class="panel-tab" data-tab="replay" onclick="switchPanelTab('replay')">Replay</button>
+                <button class="panel-tab" data-tab="health" onclick="switchPanelTab('health')">Build Health</button>
+                <button class="panel-tab" data-tab="qa" onclick="switchPanelTab('qa')">
+                    Issues found
+                    <span class="tab-badge" id="qa-badge" style="display:none">0</span>
+                </button>
+                <button class="panel-tab" data-tab="economics" onclick="switchPanelTab('economics')">Run costs</button>
+                <button class="panel-tab" data-tab="constraints" onclick="switchPanelTab('constraints')">
+                    Constraint Intel
+                    <span class="tab-badge" id="constraints-badge" style="display:none">0</span>
+                </button>
+                <div class="panel-tabs-spacer"></div>
+                <div class="panel-actions">
+                    <button class="retry-btn" id="retry-btn" onclick="retryRun()">↩ Retry</button>
+                    <button class="intv-btn intv-btn-pause" id="dash-pause-btn" onclick="dashPause()">⏸ Pause</button>
+                    <button class="intv-btn intv-btn-resume" id="dash-resume-btn" onclick="dashResume()">▶ Resume</button>
+                    <button class="intv-btn intv-btn-inject" id="dash-inject-btn" onclick="dashToggleInject()">↩ Add note</button>
+                    <button class="intv-btn intv-btn-override" id="dash-override-btn" onclick="dashToggleOverride()">⚡ Special instructions</button>
+                </div>
+            </div>
+
+            <!-- Panel Content -->
+            <div class="panel-content">
+
+                <!-- LIVE VIEW -->
+                <div class="tab-panel active" id="tab-live">
+                    <div class="no-selection" id="no-selection-live">
+                        <div class="icon">⬡</div>
+                        <h3>No run selected</h3>
+                        <p>Select a run from the sidebar or start a new build to see live output.</p>
+                    </div>
+                    <div id="live-content" style="display:none">
+                        <!-- Connection-lost banner (SSE reconnection) -->
+                        <div class="connection-lost-banner" id="dash-conn-lost-banner">
+                            <div class="conn-pulse"></div>
+                            <span class="conn-text" id="dash-conn-lost-text">Connection lost — reconnecting...</span>
+                            <button class="conn-btn" onclick="dashManualReconnect()">Reconnect</button>
+                        </div>
+                        <!-- Paused banner -->
+                        <div class="dash-paused-banner" id="dash-paused-banner">
+                            <div class="dash-paused-pulse"></div>
+                            <span>Build paused — add a note or continue</span>
+                        </div>
+
+                        <!-- Inject panel -->
+                        <div class="dash-intv-panel inject-mode" id="dash-inject-panel">
+                            <div class="dash-intv-label inject-mode">↩ Add a note for the next step</div>
+                            <div class="dash-intv-row">
+                                <input id="dash-inject-input" class="dash-intv-input" type="text" placeholder='"focus on security" or "make error messages friendlier"'>
+                                <button class="dash-intv-send" id="dash-inject-send" onclick="dashSendInject()">Send</button>
+                            </div>
+                            <div id="dash-inject-log"></div>
+                        </div>
+
+                        <!-- Override panel -->
+                        <div class="dash-intv-panel override-mode" id="dash-override-panel">
+                            <div class="dash-intv-label override-mode">⚡ Give special instructions for one step</div>
+                            <div class="dash-override-agents" id="dash-override-agents">
+                                <button class="dash-override-agent" data-agent="planner" onclick="dashSelectAgent(this)">Planning</button>
+                                <button class="dash-override-agent" data-agent="builder" onclick="dashSelectAgent(this)">Building</button>
+                                <button class="dash-override-agent" data-agent="ops" onclick="dashSelectAgent(this)">Operations</button>
+                                <button class="dash-override-agent" data-agent="qa" onclick="dashSelectAgent(this)">Quality check</button>
+                            </div>
+                            <div class="dash-intv-row">
+                                <textarea id="dash-override-input" class="dash-override-textarea" placeholder="What should this step do differently?"></textarea>
+                                <button class="dash-override-send" id="dash-override-send" onclick="dashSendOverride()">Apply</button>
+                            </div>
+                        </div>
+
+                        <!-- Agent Status -->
+                        <div class="section-heading">Build progress</div>
+                        <div class="agents-row" id="agents-row">
+                            <div class="agent-card" id="agent-planner">
+                                <div class="agent-card-top">
+                                    <span class="agent-name">Planning</span>
+                                    <div class="agent-indicator"></div>
+                                </div>
+                                <div class="agent-stage" id="planner-stage">idle</div>
+                            </div>
+                            <div class="agent-card" id="agent-builder">
+                                <div class="agent-card-top">
+                                    <span class="agent-name">Building</span>
+                                    <div class="agent-indicator"></div>
+                                </div>
+                                <div class="agent-stage" id="builder-stage">idle</div>
+                            </div>
+                            <div class="agent-card" id="agent-ops">
+                                <div class="agent-card-top">
+                                    <span class="agent-name">Operations</span>
+                                    <div class="agent-indicator"></div>
+                                </div>
+                                <div class="agent-stage" id="ops-stage">idle</div>
+                            </div>
+                            <div class="agent-card" id="agent-qa">
+                                <div class="agent-card-top">
+                                    <span class="agent-name">Quality check</span>
+                                    <div class="agent-indicator"></div>
+                                </div>
+                                <div class="agent-stage" id="qa-stage">idle</div>
+                            </div>
+                        </div>
+
+                        <!-- Phase Progress -->
+                        <div class="phase-progress-section">
+                            <div class="phase-progress-label">Build progress</div>
+                            <div class="phase-bar-row" id="phase-bar-row">
+                                <div class="phase-bar-step" data-phase="plan" data-status="pending" style="--phase-color: var(--phase-plan)">
+                                    <div class="p-dot"></div>
+                                    <span class="p-name">Understanding</span>
+                                </div>
+                                <div class="p-connector"></div>
+                                <div class="phase-bar-step" data-phase="scaffold" data-status="pending" style="--phase-color: var(--phase-scaffold)">
+                                    <div class="p-dot"></div>
+                                    <span class="p-name">Structure</span>
+                                </div>
+                                <div class="p-connector"></div>
+                                <div class="phase-bar-step" data-phase="code" data-status="pending" style="--phase-color: var(--phase-code)">
+                                    <div class="p-dot"></div>
+                                    <span class="p-name">Building</span>
+                                </div>
+                                <div class="p-connector"></div>
+                                <div class="phase-bar-step" data-phase="save" data-status="pending" style="--phase-color: var(--phase-save)">
+                                    <div class="p-dot"></div>
+                                    <span class="p-name">Saving</span>
+                                </div>
+                                <div class="p-connector"></div>
+                                <div class="phase-bar-step" data-phase="verify" data-status="pending" style="--phase-color: var(--phase-verify)">
+                                    <div class="p-dot"></div>
+                                    <span class="p-name">Checking</span>
+                                </div>
+                                <div class="p-connector"></div>
+                                <div class="phase-bar-step" data-phase="deploy" data-status="pending" style="--phase-color: var(--phase-deploy)">
+                                    <div class="p-dot"></div>
+                                    <span class="p-name">Deploy</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Terminal Output -->
+                        <div class="terminal">
+                            <div class="terminal-header">
+                                <div class="term-tabs" id="term-tabs">
+                                    <button class="term-tab active" data-tab="plan" onclick="switchTermTab('plan')">Understanding</button>
+                                    <button class="term-tab" data-tab="scaffold" onclick="switchTermTab('scaffold')">Structure</button>
+                                    <button class="term-tab" data-tab="code" onclick="switchTermTab('code')">Building</button>
+                                    <button class="term-tab" data-tab="save" onclick="switchTermTab('save')">Saving</button>
+                                    <button class="term-tab" data-tab="verify" onclick="switchTermTab('verify')">Checking</button>
+                                </div>
+                                <div class="term-status" id="term-status">
+                                    <div class="s-dot"></div>
+                                    <span id="term-status-text">idle</span>
+                                </div>
+                            </div>
+                            <div class="terminal-body" id="terminal-body">
+                                <div class="term-content" id="term-content">
+                                    <span class="term-placeholder">Select a run to view output.</span>
+                                </div>
+                                <span class="term-cursor" id="term-cursor" style="display:none"></span>
+                            </div>
+                        </div>
+
+                        <!-- Deploy Panel (shown for completed runs with deployment) -->
+                        <div id="dash-deploy-panel" style="display:none">
+                            <div>
+                                <span>🌐 Your live site</span>
+                                <a id="dash-deploy-url" href="#" target="_blank" rel="noopener"
+                                    onmouseover="this.style.background='var(--accent-dim)'" onmouseout="this.style.background='transparent'">
+                                    View site →
+                                </a>
+                            </div>
+                            <div id="dash-deploy-actions">
+                                <button id="dash-deploy-btn" onclick="dashTriggerDeploy()" onmouseover="this.style.background='rgba(20,184,166,0.2)'" onmouseout="this.style.background='var(--accent-dim)'">🚀 Deploy now</button>
+                            </div>
+                        </div>
+                        <!-- Code Copilot link (shown for completed runs) -->
+                        <div id="dash-copilot-row" style="display:none;margin-top:8px">
+                            <a id="dash-copilot-link" href="#"
+                               style="display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 12px;border-radius:8px;background:linear-gradient(135deg,rgba(14,165,233,0.12),rgba(99,102,241,0.12));color:#0284C7;font-weight:600;text-decoration:none;border:1px solid rgba(14,165,233,0.25);transition:all 0.15s"
+                               onmouseover="this.style.background='linear-gradient(135deg,rgba(14,165,233,0.2),rgba(99,102,241,0.2))'"
+                               onmouseout="this.style.background='linear-gradient(135deg,rgba(14,165,233,0.12),rgba(99,102,241,0.12))'">
+                               ✨ Code Copilot
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- REPLAY -->
+                <div class="tab-panel" id="tab-replay">
+                    <div class="no-selection" id="no-selection-replay">
+                        <div class="icon">⏮</div>
+                        <h3>No run selected</h3>
+                        <p>Select a completed run to see its full chronological timeline.</p>
+                    </div>
+                    <div id="replay-content" style="display:none">
+                        <div class="replay-header-row">
+                            <div class="section-heading">Timeline</div>
+                            <div class="replay-meta" id="replay-meta"></div>
+                        </div>
+                        <div>
+                            <div class="timeline" id="replay-timeline">
+                                <div class="replay-loading">Loading timeline...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HEALTH -->
+                <div class="tab-panel" id="tab-health">
+                    <div class="no-selection" id="no-selection-health">
+                        <div class="icon">❤︎</div>
+                        <h3>No run selected</h3>
+                        <p>Select a run to view build metrics.</p>
+                    </div>
+                    <div id="health-content" style="display:none">
+                        <div class="section-heading">Build metrics</div>
+                        <div class="health-grid" id="health-grid"></div>
+                        <div class="section-heading">Step durations</div>
+                        <div class="stage-durations" id="stage-durations"></div>
+                    </div>
+                </div>
+
+                <!-- QA ISSUES -->
+                <div class="tab-panel" id="tab-qa">
+                    <div class="no-selection" id="no-selection-qa">
+                        <div class="icon">🔍</div>
+                        <h3>No run selected</h3>
+                        <p>Select a run to see issues found during quality checks.</p>
+                    </div>
+                    <div id="qa-content" style="display:none">
+                        <div class="section-heading">Issue Summary</div>
+                        <div class="qa-summary-row" id="qa-summary-row"></div>
+                        <div class="section-heading">Issues</div>
+                        <div class="issues-list" id="issues-list"></div>
+                    </div>
+                </div>
+
+                <!-- ECONOMICS -->
+                <div class="tab-panel" id="tab-economics">
+                    <!-- Run cost section (visible when run selected) -->
+                    <div id="econ-run-section" style="display:none">
+                        <div class="section-heading">What this run cost</div>
+
+                        <!-- Budget status bar (shown if budget configured) -->
+                        <div id="budget-status-bar" class="budget-status-bar" style="display:none">
+                            <span class="budget-status-label">Budget</span>
+                            <div class="budget-track">
+                                <div class="budget-fill" id="budget-fill" style="width:0%"></div>
+                            </div>
+                            <span class="budget-status-text" id="budget-status-text">$0.000 / $0.000</span>
+                        </div>
+
+                        <!-- Per-stage cost bars -->
+                        <div class="econ-section">
+                            <div class="econ-section-title">Cost by step</div>
+                            <div class="cost-bar-group" id="run-phase-bars">
+                                <div>Loading...</div>
+                            </div>
+                            <div class="token-summary-row" id="run-token-summary"></div>
+                        </div>
+
+                        <!-- Per-agent cost bars -->
+                        <div class="econ-section">
+                            <div class="econ-section-title">Cost by role</div>
+                            <div class="cost-bar-group" id="run-agent-bars">
+                                <div>Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Aggregate summary (always visible) -->
+                    <div id="econ-summary-section">
+                        <div class="section-heading">All-time spend</div>
+
+                        <div class="econ-stats-row" id="econ-stats-row">
+                            <div class="econ-stat-card">
+                                <div class="econ-stat-label">Total Spend</div>
+                                <div class="econ-stat-value" id="econ-total-spend">—</div>
+                                <div class="econ-stat-sub" id="econ-run-count">across — runs</div>
+                            </div>
+                            <div class="econ-stat-card">
+                                <div class="econ-stat-label">Avg Cost / Run</div>
+                                <div class="econ-stat-value" id="econ-avg-cost">—</div>
+                                <div class="econ-stat-sub">per build</div>
+                            </div>
+                            <div class="econ-stat-card">
+                                <div class="econ-stat-label">Cost / Success</div>
+                                <div class="econ-stat-value" id="econ-cost-per-success">—</div>
+                                <div class="econ-stat-sub" id="econ-success-rate">— success rate</div>
+                            </div>
+                            <div class="econ-stat-card">
+                                <div class="econ-stat-label">Efficiency Score</div>
+                                <div class="econ-stat-value" id="econ-efficiency">—</div>
+                                <div class="econ-stat-sub">successful runs / total</div>
+                            </div>
+                        </div>
+
+                        <!-- Cost trend chart -->
+                        <div class="econ-section">
+                            <div class="econ-section-title">Cost Trend (recent runs)</div>
+                            <div class="cost-trend-chart" id="cost-trend-chart">
+                                <div>Loading...</div>
+                            </div>
+                        </div>
+
+                        <!-- Agent breakdown -->
+                        <div>
+                            <div class="econ-section">
+                                <div class="econ-section-title">Spend by role</div>
+                                <div class="cost-bar-group" id="summary-agent-bars">
+                                    <div>Loading...</div>
+                                </div>
+                            </div>
+                            <div class="econ-section">
+                                <div class="econ-section-title">Spend by step</div>
+                                <div class="cost-bar-group" id="summary-phase-bars">
+                                    <div>Loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CONSTRAINT INTELLIGENCE -->
+                <div class="tab-panel" id="tab-constraints">
+                    <div class="no-selection" id="no-selection-constraints">
+                        <div class="icon">⬡</div>
+                        <h3>No run selected</h3>
+                        <p>Select a run to see Intent Gate classification and constraint telemetry.</p>
+                    </div>
+                    <div id="constraints-content" style="display:none">
+                        <div class="constraint-panel">
+                            <!-- Intent Classification Card -->
+                            <div class="section-heading">Intent Classification</div>
+                            <div class="constraint-card" id="ci-intent-card">
+                                <div>Loading...</div>
+                            </div>
+
+                            <!-- Violations Card (shown if violations exist) -->
+                            <div id="ci-violations-section" style="display:none">
+                                <div class="section-heading">⚠️ Violations Detected</div>
+                                <div class="constraint-card" id="ci-violations-card"></div>
+                            </div>
+
+                            <!-- Learning Applied Card (shown if adjustments exist) -->
+                            <div id="ci-learning-section" style="display:none">
+                                <div class="section-heading">Learning Applied</div>
+                                <div class="constraint-card" id="ci-learning-card"></div>
+                            </div>
+
+                            <!-- Explainability: Decision Log -->
+                            <div id="ci-decision-section" style="display:none">
+                                <div class="section-heading">Decision Trace</div>
+                                <div class="constraint-card" id="ci-decision-card"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ── New Run Modal ──────────────────────────────────────── -->
+    <div class="modal-overlay" id="run-modal" onclick="closeRunModalIfOutside(event)">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Start a new build</h2>
+                <button class="modal-close" onclick="closeRunModal()">✕</button>
+            </div>
+            <textarea id="modal-prompt" placeholder="Build a task management app with categories, due dates, and a polished dashboard..." rows="4"></textarea>
+            <!-- Optional budget controls -->
+            <div>
+                <div>
+                    <label>Spending limit ($)</label>
+                    <input id="modal-budget-cap" type="number" min="0.001" max="10" step="0.001" placeholder="no limit"
+                        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+                </div>
+                <div>
+                    <label>Warning amount ($)</label>
+                    <input id="modal-budget-warning" type="number" min="0.001" max="10" step="0.001" placeholder="no warn"
+                        onfocus="this.style.borderColor='var(--warning)'" onblur="this.style.borderColor='var(--border)'">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="modal-hint mono">⌘↵ to submit</span>
+                <button class="modal-run-btn" id="modal-run-btn" onclick="submitRun()">
+                    Launch →
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Artifact Viewer ────────────────────────────────────── -->
+    <div class="artifact-viewer" id="artifact-viewer" onclick="closeArtifactViewerIfOutside(event)">
+        <div class="artifact-modal">
+            <div class="artifact-modal-header">
+                <span class="artifact-modal-title" id="artifact-modal-title">your file</span>
+                <button class="modal-close" onclick="closeArtifactViewer()">✕</button>
+            </div>
+            <div class="artifact-modal-body">
+                <pre class="artifact-code" id="artifact-code"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Delete Confirmation ────────────────────────────────── -->
+    <div class="modal-overlay" id="delete-confirm-overlay" onclick="cancelDeleteRun()">
+        <div class="delete-confirm-modal" onclick="event.stopPropagation()">
+            <div class="delete-confirm-title">Delete project?</div>
+            <div class="delete-confirm-desc" id="delete-confirm-desc">This will permanently remove all associated data.</div>
+            <div class="delete-confirm-actions">
+                <button class="delete-cancel-btn" onclick="cancelDeleteRun()">Cancel</button>
+                <button class="delete-confirm-btn" id="delete-confirm-btn" onclick="confirmDeleteRun()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Toast ──────────────────────────────────────────────── -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+    (function() {
+        // ── Constants ─────────────────────────────────────────
+        const PHASES = ['plan', 'scaffold', 'code', 'save', 'verify', 'deploy'];
+        const AGENT_STAGE_MAP = {
+            plan: 'planner',
+            scaffold: 'builder',
+            code: 'builder',
+            save: 'ops',
+            verify: 'qa'
+        };
+        const PHASE_LABELS = {
+            plan: 'Understanding your request',
+            scaffold: 'Setting up structure',
+            code: 'Building your product',
+            save: 'Storing your work',
+            verify: 'Checking everything works'
+        };
+
+        // ── State ─────────────────────────────────────────────
+        let runs = [];
+        let selectedRunId = null;
+        let phaseContent = {};
+        let activeTermTab = 'plan';
+        let activePanelTab = 'live';
+        let liveEventSource = null;
+        let currentRunStatus = null;
+        let refreshInterval = null;
+
+        // ── Init ──────────────────────────────────────────────
+        PHASES.forEach(p => { phaseContent[p] = ''; });
+
+        loadRuns();
+        loadQueueStatus();
+        loadAgentStatus();
+        loadCostsSummary(); // Pre-load economics summary for the Economics tab
+        loadConstraintHealth(); // Pre-load constraint health summary for sidebar
+
+        // Poll for run list updates every 5s
+        refreshInterval = setInterval(() => {
+            loadRuns(false);
+            loadQueueStatus();
+        }, 5000);
+
+        // ── Run List ──────────────────────────────────────────
+        // ── Delete run ─────────────────────────────────────────────
+        let _deleteTargetId = null;
+
+        function deleteRun(runId, promptText) {
+            _deleteTargetId = runId;
+            const maxLen = 55;
+            const truncated = promptText.length > maxLen ? promptText.slice(0, maxLen) + '…' : promptText;
+            document.getElementById('delete-confirm-desc').innerHTML =
+                `Delete <strong style="color:var(--text)">"${escHtml(truncated)}"</strong>?<br>This will permanently remove all associated data and cannot be undone.`;
+            const btn = document.getElementById('delete-confirm-btn');
+            btn.disabled = false;
+            btn.textContent = 'Delete';
+            document.getElementById('delete-confirm-overlay').classList.add('show');
+        }
+
+        function cancelDeleteRun() {
+            _deleteTargetId = null;
+            document.getElementById('delete-confirm-overlay').classList.remove('show');
+        }
+
+        async function confirmDeleteRun() {
+            if (!_deleteTargetId) return;
+            const runId = _deleteTargetId;
+            const btn = document.getElementById('delete-confirm-btn');
+            btn.disabled = true;
+            btn.textContent = 'Deleting…';
+
+            try {
+                const res = await fetch(`/api/pipeline/${runId}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.message || 'Delete failed');
+
+                // Remove from in-memory runs array
+                runs = runs.filter(r => r.id !== runId);
+
+                // Animate the card out
+                const el = document.querySelector(`[data-run-id="${runId}"]`);
+                if (el) {
+                    const h = el.offsetHeight;
+                    el.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+                    el.style.overflow = 'hidden';
+                    el.style.opacity = '0';
+                    el.style.transform = 'translateX(-10px)';
+                    setTimeout(() => {
+                        el.style.transition += ', max-height 0.25s ease, margin-bottom 0.25s ease, padding 0.25s ease';
+                        el.style.maxHeight = h + 'px';
+                        requestAnimationFrame(() => {
+                            el.style.maxHeight = '0';
+                            el.style.marginBottom = '0';
+                            el.style.padding = '0';
+                        });
+                        setTimeout(() => {
+                            el.remove();
+                            if (runs.length === 0) renderRunList();
+                        }, 280);
+                    }, 200);
+                } else {
+                    if (runs.length === 0) renderRunList();
+                }
+
+                cancelDeleteRun();
+                showToast('Project deleted', 'success');
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = 'Delete';
+                showToast('Delete failed: ' + err.message, 'error');
+            }
+        }
+
+        async function loadRuns(showLoading = true) {
+            try {
+                const res = await fetch('/api/pipeline');
+                const data = await res.json();
+                if (!data.success) return;
+
+                runs = data.runs || [];
+                renderRunList();
+            } catch (err) {
+                console.error('Failed to load runs:', err);
+            }
+        }
+
+        function renderRunList() {
+            const list = document.getElementById('runs-list');
+            const countEl = document.getElementById('run-count');
+
+            countEl.textContent = runs.length + ' run' + (runs.length !== 1 ? 's' : '');
+
+            if (runs.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-runs">
+                        <span>🚀</span>
+                        No builds yet.<br>Start one to get going.
+                    </div>`;
+                return;
+            }
+
+            list.innerHTML = runs.map(run => {
+                const phasesDone = getPhasesDone(run);
+                const total = PHASES.length;
+                const isSelected = run.id === selectedRunId;
+                const statusLabel = getStatusLabel(run);
+
+                const deployBadge = getDeployBadge(run);
+                const constraintBadges = getConstraintBadges(run);
+                return `
+                <div class="run-item${isSelected ? ' selected' : ''}" onclick="selectRun('${run.id}')" data-run-id="${run.id}">
+                    <div class="run-item-top">
+                        <span class="run-prompt-text">${escHtml(run.prompt)}</span>
+                        <span class="run-deploy-badge ${deployBadge.cls}">${deployBadge.text}</span>
+                        <span class="run-status-badge ${statusLabel.cls}">${statusLabel.text}</span>
+                        <button class="run-delete-btn" title="Delete build" data-prompt="${escHtml(run.prompt)}" onclick="event.stopPropagation(); deleteRun('${run.id}', this.dataset.prompt)">
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,3 11,3"/><path d="M3,3V10a1,1 0 0,0 1,1h4a1,1 0 0,0 1,-1V3"/><path d="M4,3V2a1,1 0 0,1 1,-1h2a1,1 0 0,1 1,1v1"/></svg>
+                        </button>
+                    </div>
+                    <div class="run-item-meta">
+                        <span class="run-id-label mono">#${run.id.slice(0,8)}</span>
+                        <div class="run-phases-mini">${renderPhasePips(run, phasesDone)}</div>
+                        ${constraintBadges}
+                        <span class="run-time">${formatRelTime(run.created_at)}</span>
+                        <a href="/trace?run=${run.id}" onclick="event.stopPropagation()" style="font-size:0.75rem;color:var(--text-dim);text-decoration:none;padding:0.1rem 0.35rem;border:1px solid var(--border);border-radius:3px;transition:all 0.15s;flex-shrink:0;font-family:'DM Mono',monospace" onmouseover="this.style.color='var(--accent)';this.style.borderColor='rgba(20,184,166,.3)'" onmouseout="this.style.color='var(--text-dim)';this.style.borderColor='var(--border)'">trace</a>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function getStatusLabel(run) {
+            const s = (run.status || run.state || '').toLowerCase();
+            if (s === 'running' || s === 'in_progress') return { cls: 'running', text: 'Building...' };
+            if (s === 'completed') return { cls: 'completed', text: 'Completed ✓' };
+            if (s === 'failed') return { cls: 'failed', text: 'Failed — needs attention' };
+            if (s === 'paused') return { cls: 'paused', text: '⏸ Paused' };
+            if (s === 'queued') return { cls: 'queued', text: 'Queued' };
+            return { cls: 'queued', text: 'Waiting' };
+        }
+
+        function getDeployBadge(run) {
+            const d = run.deployment;
+            if (!d) return { cls: 'none', text: '' };
+            if (d.status === 'deployed') return { cls: 'deployed', text: '🌐 live' };
+            if (d.status === 'failed') return { cls: 'none', text: '' };
+            return { cls: 'none', text: '' };
+        }
+
+        function getConstraintBadges(run) {
+            // Prefer the top-level intent_class column (new); fall back to constraintSummary (legacy)
+            const rawIntentClass = run.intent_class || run.constraintSummary?.intentClass || null;
+            if (!rawIntentClass) return '';
+
+            const cs = run.constraintSummary;
+
+            // Canonical intent_class display names
+            const intentDisplayMap = {
+                STATIC_SURFACE:        '🌐 Landing Page',
+                INTERACTIVE_LIGHT_APP: '⚡ Light App',
+                PRODUCT_SYSTEM:        '🏗 Full Product',
+                // Legacy internal names (fallback for older runs backfilled from constraint_predictions)
+                static_surface:  '🌐 Landing Page',
+                light_app:       '⚡ Light App',
+                full_product:    '🏗 Full Product',
+                soft_expansion:  '⚡ Light App',
+            };
+            const intentLabel = intentDisplayMap[rawIntentClass] || rawIntentClass.replace(/_/g, ' ').toLowerCase();
+            const intentClassCss = rawIntentClass.replace(/[^a-z0-9_]/gi, '').toLowerCase();
+            const intentBadge = `<span class="intent-badge ${intentClassCss}" title="Intent: ${rawIntentClass}">${intentLabel}</span>`;
+
+            // Violation status dot (uses constraintSummary when available)
+            let violDot = '';
+            if (cs && (run.status === 'completed' || run.status === 'failed')) {
+                if (cs.hasHardFail) {
+                    violDot = `<span class="violation-dot hard-fail" title="Hard constraint fail">✕</span>`;
+                } else if (cs.violationCount > 0) {
+                    violDot = `<span class="violation-dot violations" title="${cs.violationCount} violation${cs.violationCount !== 1 ? 's' : ''}">!</span>`;
+                } else {
+                    violDot = `<span class="violation-dot clean" title="Clean — no violations">✓</span>`;
+                }
+            }
+
+            return intentBadge + violDot;
+        }
+
+        function getPhasesDone(run) {
+            const s = (run.status || run.state || '').toLowerCase();
+            if (s === 'completed') return PHASES.length;
+            const phases = ['plan', 'scaffold', 'code', 'save', 'verify'];
+            if (run.current_stage) {
+                const idx = phases.indexOf(run.current_stage);
+                return idx >= 0 ? idx : 0;
+            }
+            return 0;
+        }
+
+        function renderPhasePips(run, done) {
+            const s = (run.status || run.state || '').toLowerCase();
+            return PHASES.map((p, i) => {
+                let cls = '';
+                if (i < done) cls = 'done';
+                else if (i === done && (s === 'running' || s === 'in_progress')) cls = 'running';
+                else if (s === 'failed' && i === done) cls = 'failed';
+                return `<div class="phase-pip ${cls}"></div>`;
+            }).join('');
+        }
+
+        // ── Select Run ────────────────────────────────────────
+        async function selectRun(runId) {
+            if (runId === selectedRunId) return;
+
+            // Close existing stream and cancel any pending reconnect
+            if (liveEventSource) {
+                liveEventSource.close();
+                liveEventSource = null;
+            }
+            if (_dashReconnectTimer) clearTimeout(_dashReconnectTimer);
+            _dashBuildTerminal = false;
+            _dashReconnectAttempts = 0;
+            _dashStreamRunId = null;
+            _dashHideConnLostBanner();
+
+            selectedRunId = runId;
+            dashSelectedAgent = null;
+
+            // Reset intervention panels when switching runs
+            document.getElementById('dash-paused-banner').classList.remove('show');
+            document.getElementById('dash-inject-panel').classList.remove('show');
+            document.getElementById('dash-override-panel').classList.remove('show');
+            document.getElementById('dash-inject-log').innerHTML = '';
+            ['dash-pause-btn','dash-resume-btn','dash-inject-btn','dash-override-btn'].forEach(id => {
+                document.getElementById(id).classList.remove('show');
+            });
+
+            renderRunList(); // Update selected state
+
+            // Reset phase content
+            PHASES.forEach(p => { phaseContent[p] = ''; });
+            resetPhaseIndicators();
+            switchTermTab('plan', false);
+            setTermStatus('', 'loading');
+
+            // Reset deploy panel
+            const dashDeployPanel = document.getElementById('dash-deploy-panel');
+            if (dashDeployPanel) dashDeployPanel.style.display = 'none';
+            const dashDeployUrl = document.getElementById('dash-deploy-url');
+            if (dashDeployUrl) dashDeployUrl.style.display = 'none';
+            const dashDeployActions = document.getElementById('dash-deploy-actions');
+            if (dashDeployActions) { dashDeployActions.style.display = 'flex'; }
+            const dashDeployBtn = document.getElementById('dash-deploy-btn');
+            if (dashDeployBtn) { dashDeployBtn.disabled = false; dashDeployBtn.textContent = '🚀 Deploy now'; }
+            // Reset copilot row
+            const dashCopilotRow = document.getElementById('dash-copilot-row');
+            if (dashCopilotRow) dashCopilotRow.style.display = 'none';
+
+            // Show live content
+            showLiveContent();
+
+            // Update retry button
+            const run = runs.find(r => r.id === runId);
+            updateRetryBtn(run);
+            // Show copilot link for completed runs
+            if (run && run.status === 'completed') {
+                const copilotRow = document.getElementById('dash-copilot-row');
+                const copilotLink = document.getElementById('dash-copilot-link');
+                if (copilotRow && copilotLink) {
+                    copilotLink.href = `/copilot?run=${runId}`;
+                    copilotRow.style.display = 'block';
+                }
+            }
+
+            // Load panel data
+            loadLiveView(runId, run);
+            if (activePanelTab === 'replay') loadReplay(runId);
+            if (activePanelTab === 'health') loadHealth(runId);
+            if (activePanelTab === 'qa') loadQA(runId);
+            if (activePanelTab === 'constraints') loadConstraints(runId);
+        }
+        window.selectRun = selectRun;
+
+        function showLiveContent() {
+            document.getElementById('no-selection-live').style.display = 'none';
+            document.getElementById('live-content').style.display = 'block';
+            document.getElementById('no-selection-replay').style.display = 'none';
+            document.getElementById('replay-content').style.display = 'block';
+            document.getElementById('no-selection-health').style.display = 'none';
+            document.getElementById('health-content').style.display = 'block';
+            document.getElementById('no-selection-qa').style.display = 'none';
+            document.getElementById('qa-content').style.display = 'block';
+            // Constraints panel: show no-selection until tab is explicitly loaded
+            // (loadConstraints handles showing/hiding its sections)
+        }
+
+        // ── Live View ─────────────────────────────────────────
+        async function loadLiveView(runId, run) {
+            const statusClass = run ? getStatusLabel(run).cls : 'queued';
+            const cursor = document.getElementById('term-cursor');
+
+            if (statusClass === 'running') {
+                setTermStatus('running', 'streaming');
+                cursor.style.display = '';
+                connectStream(runId);
+            } else if (statusClass === 'paused') {
+                setTermStatus('', 'paused ⏸');
+                cursor.style.display = 'none';
+                await loadEventsIntoTerminal(runId);
+                // Keep stream alive for when it resumes
+                connectStream(runId);
+            } else if (statusClass === 'completed') {
+                setTermStatus('completed', 'completed');
+                cursor.style.display = 'none';
+                // Load events for replay
+                await loadEventsIntoTerminal(runId);
+            } else if (statusClass === 'failed') {
+                setTermStatus('failed', 'failed');
+                cursor.style.display = 'none';
+                await loadEventsIntoTerminal(runId);
+            } else {
+                setTermStatus('', 'queued');
+                cursor.style.display = 'none';
+                setTermContent('plan', '<span style="color:var(--text-dim)">Run is queued. Waiting to start...</span>');
+            }
+
+            await loadAgentStatus();
+
+            // Load deploy status for this run
+            if (run && (run.status === 'completed' || (run.deployment && run.deployment.status === 'deployed'))) {
+                loadDeployStatus(runId, run);
+            }
+        }
+
+        async function loadDeployStatus(runId, run) {
+            const panel = document.getElementById('dash-deploy-panel');
+            const urlEl = document.getElementById('dash-deploy-url');
+            const actionsEl = document.getElementById('dash-deploy-actions');
+            if (!panel) return;
+
+            // Check cached deployment on run object first
+            if (run?.deployment?.status === 'deployed' && run?.deployment?.url) {
+                panel.style.display = 'block';
+                if (urlEl) {
+                    urlEl.href = window.location.origin + run.deployment.url;
+                    urlEl.style.display = 'inline-flex';
+                }
+                if (actionsEl) actionsEl.style.display = 'none';
+                return;
+            }
+
+            if (run?.deployment?.status === 'deployed') {
+                // Has deployment but no cached URL — fetch from API
+            } else if (run?.status !== 'completed') {
+                panel.style.display = 'none';
+                return;
+            }
+
+            // Fetch deploy status
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/deploy/status`);
+                const data = await res.json();
+                panel.style.display = 'block';
+
+                if (data.activeDeployment?.status === 'deployed' && data.url) {
+                    if (urlEl) {
+                        urlEl.href = window.location.origin + data.url;
+                        urlEl.style.display = 'inline-flex';
+                    }
+                    if (actionsEl) actionsEl.style.display = 'none';
+                } else {
+                    if (urlEl) urlEl.style.display = 'none';
+                    if (actionsEl) actionsEl.style.display = 'flex';
+                }
+            } catch (_) {
+                // Show deploy button for completed runs
+                panel.style.display = 'block';
+                if (urlEl) urlEl.style.display = 'none';
+            }
+        }
+
+        async function dashTriggerDeploy() {
+            if (!selectedRunId) return;
+            const btn = document.getElementById('dash-deploy-btn');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Deploying...'; }
+            try {
+                const res = await fetch(`/api/pipeline/${selectedRunId}/deploy`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success && btn) btn.textContent = '✓ Deploy started';
+                else if (btn) { btn.disabled = false; btn.textContent = '🚀 Deploy now'; }
+            } catch (_) {
+                if (btn) { btn.disabled = false; btn.textContent = '🚀 Deploy now'; }
+            }
+        }
+        window.dashTriggerDeploy = dashTriggerDeploy;
+
+        async function loadEventsIntoTerminal(runId) {
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/events`);
+                const data = await res.json();
+                if (!data.success) return;
+
+                for (const event of data.events) {
+                    const { stage, status, payload } = event;
+                    if (!stage) continue;
+
+                    if (status === 'started') {
+                        updatePhaseIndicator(stage, 'running');
+                    } else if (status === 'completed') {
+                        updatePhaseIndicator(stage, 'completed');
+                        if (payload) {
+                            const p = typeof payload === 'string' ? JSON.parse(payload) : payload;
+                            if (p.raw || p.rawMarkdown) {
+                                appendTermContent(stage, p.raw || p.rawMarkdown);
+                            } else if (p.files) {
+                                const fileList = Object.entries(p.files)
+                                    .map(([name, code]) => `### ${name}\n\`\`\`javascript\n${code}\n\`\`\``)
+                                    .join('\n\n');
+                                appendTermContent(stage, fileList);
+                            }
+                        }
+                    } else if (status === 'failed') {
+                        updatePhaseIndicator(stage, 'failed');
+                    }
+                }
+
+                renderTerminal(activeTermTab);
+            } catch (err) {
+                console.error('Failed to load events:', err);
+            }
+        }
+
+        // ── SSE Stream with Reconnection ─────────────────────
+        let _dashReconnectAttempts = 0;
+        let _dashReconnectTimer = null;
+        let _dashStreamRunId = null;
+        let _dashBuildTerminal = false;
+
+        function connectStream(runId) {
+            _dashStreamRunId = runId;
+            _dashReconnectAttempts = 0;
+            _dashBuildTerminal = false;
+            _dashDoConnect(runId);
+        }
+
+        function _dashDoConnect(runId) {
+            // Close any existing connection
+            if (liveEventSource) {
+                try { liveEventSource.close(); } catch (_) {}
+                liveEventSource = null;
+            }
+
+            const isReconnect = _dashReconnectAttempts > 0;
+            if (isReconnect) {
+                // Clear phase content — server replays everything
+                PHASES.forEach(p => { phaseContent[p] = ''; });
+                resetPhaseIndicators();
+                document.getElementById('term-cursor').style.display = '';
+            }
+
+            const es = new EventSource(`/api/pipeline/${runId}/stream`);
+            liveEventSource = es;
+
+            es.addEventListener('connected', () => {
+                _dashReconnectAttempts = 0;
+                _dashHideConnLostBanner();
+                if (isReconnect) {
+                    setTermStatus('running', 'reconnected');
+                }
+            });
+
+            es.addEventListener('phase', (e) => {
+                const d = JSON.parse(e.data);
+                updatePhaseIndicator(d.phase, d.status);
+
+                if (d.status === 'running') {
+                    const agent = AGENT_STAGE_MAP[d.phase];
+                    if (agent) activateAgent(agent, PHASE_LABELS[d.phase] || d.phase);
+                }
+
+                if (d.status === 'completed') {
+                    const agent = AGENT_STAGE_MAP[d.phase];
+                    if (agent) deactivateAgent(agent);
+                }
+            });
+
+            es.addEventListener('output', (e) => {
+                const d = JSON.parse(e.data);
+                appendTermContent(d.phase, d.content);
+                renderTerminal(activeTermTab);
+                if (d.phase === activeTermTab) {
+                    const body = document.getElementById('terminal-body');
+                    body.scrollTop = body.scrollHeight;
+                }
+            });
+
+            // Real-time cost / budget events
+            es.addEventListener('cost_update', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    if (activePanelTab === 'economics' && runId) {
+                        loadEconomics(runId);
+                    }
+                    if (d.totalCostUsd != null) {
+                        const fill = document.getElementById('budget-fill');
+                        const text = document.getElementById('budget-status-text');
+                        if (fill && text) {
+                            const bar = document.getElementById('budget-status-bar');
+                            if (bar.style.display !== 'none') {
+                                const parts = (text.textContent || '').split('/');
+                                const cap = parts[1] ? parseFloat(parts[1].replace('$','').trim()) : null;
+                                if (cap) {
+                                    const pct = Math.min((d.totalCostUsd / cap) * 100, 100);
+                                    fill.style.width = `${pct.toFixed(1)}%`;
+                                    text.textContent = `${fmtUsd(d.totalCostUsd)} / ${fmtUsd(cap)}`;
+                                }
+                            }
+                        }
+                    }
+                } catch (_) {}
+            });
+
+            es.addEventListener('budget_warning', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    showToast(`⚠ Spending warning: ${fmtUsd(d.totalCost)} nearing ${fmtUsd(d.budgetWarning)} limit`, 'warning');
+                    const bar = document.getElementById('budget-status-bar');
+                    if (bar) { bar.classList.add('warning'); }
+                } catch (_) {}
+            });
+
+            es.addEventListener('budget_exceeded', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    showToast(`✕ Spending limit reached: ${fmtUsd(d.totalCost)} — build stopped`, 'error');
+                    const bar = document.getElementById('budget-status-bar');
+                    if (bar) { bar.classList.add('exceeded'); }
+                } catch (_) {}
+            });
+
+            // ── Structured Verification Report ─────────
+            // Update the verify phase indicator to reflect the actual check results.
+            // Without this, the phase bar always shows green "completed" for verify,
+            // even when individual checks failed — a trust-breaking contradiction.
+            es.addEventListener('verify_report', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    if (typeof d.totalChecks === 'number' && d.totalChecks > 0) {
+                        const allPassed = d.passed === true && d.passedCount === d.totalChecks;
+                        updatePhaseIndicator('verify', allPassed ? 'completed' : 'failed');
+                    }
+                } catch (_) {}
+            });
+
+            // Intervention events
+            es.addEventListener('pipeline_paused', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    setTermStatus('', 'paused ⏸');
+                    document.getElementById('dash-paused-banner').classList.add('show');
+                    document.getElementById('dash-pause-btn').classList.remove('show');
+                    document.getElementById('dash-resume-btn').classList.add('show');
+                    document.getElementById('dash-inject-btn').classList.add('show');
+                    document.getElementById('dash-override-btn').classList.add('show');
+                    document.getElementById('dash-inject-panel').classList.add('show');
+                    appendTermContent(activeTermTab, `\n\n[PAUSED] Build paused — add a note or continue`);
+                    renderTerminal(activeTermTab);
+                    loadRuns(false);
+                    showToast(`Build paused`, 'warning');
+                } catch (_) {}
+            });
+
+            es.addEventListener('pipeline_resumed', (e) => {
+                try {
+                    setTermStatus('running', 'streaming');
+                    document.getElementById('dash-paused-banner').classList.remove('show');
+                    document.getElementById('dash-pause-btn').classList.add('show');
+                    document.getElementById('dash-resume-btn').classList.remove('show');
+                    appendTermContent(activeTermTab, `\n\n[RESUMED] Build resuming...`);
+                    renderTerminal(activeTermTab);
+                    loadRuns(false);
+                    showToast('Build resumed', 'success');
+                } catch (_) {}
+            });
+
+            es.addEventListener('instruction_injected', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    const log = document.getElementById('dash-inject-log');
+                    if (log) log.innerHTML += `<div>↩ Note added: "${d.message}"</div>`;
+                    showToast(`Note added`, 'success');
+                } catch (_) {}
+            });
+
+            es.addEventListener('agent_overridden', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    showToast(`Special instructions set`, 'success');
+                } catch (_) {}
+            });
+
+            es.addEventListener('complete', () => {
+                _dashBuildTerminal = true;
+                setTermStatus('completed', 'completed');
+                document.getElementById('term-cursor').style.display = 'none';
+                _dashHideConnLostBanner();
+                // Hide intervention controls
+                document.getElementById('dash-pause-btn').classList.remove('show');
+                document.getElementById('dash-resume-btn').classList.remove('show');
+                document.getElementById('dash-inject-btn').classList.remove('show');
+                document.getElementById('dash-override-btn').classList.remove('show');
+                document.getElementById('dash-paused-banner').classList.remove('show');
+                document.getElementById('dash-inject-panel').classList.remove('show');
+                document.getElementById('dash-override-panel').classList.remove('show');
+                deactivateAllAgents();
+                loadRuns(false);
+                loadQA(runId);
+                if (activePanelTab === 'economics') loadEconomics(runId);
+                showToast('Build complete ✓', 'success');
+            });
+
+            es.addEventListener('error', (e) => {
+                // Check if this is a pipeline error event vs connection error
+                try {
+                    const d = JSON.parse(e.data);
+                    // Actual pipeline error from server
+                    _dashBuildTerminal = true;
+                    setTermStatus('failed', 'failed');
+                    appendTermContent(activeTermTab, `\n\n✗ Error: ${d.message}`);
+                    renderTerminal(activeTermTab);
+                    es.close();
+                    liveEventSource = null;
+                    document.getElementById('term-cursor').style.display = 'none';
+                    deactivateAllAgents();
+                    loadRuns(false);
+                    return;
+                } catch (_) {}
+
+                // SSE connection error — stream dropped
+                es.close();
+                liveEventSource = null;
+
+                // Normal close after build completed
+                if (_dashBuildTerminal) return;
+
+                // If we were just viewing a completed/failed run, don't reconnect
+                const run = runs.find(r => r.id === runId);
+                if (run && (run.status === 'completed' || run.status === 'failed')) return;
+
+                // Build still running — attempt reconnection
+                _dashShowConnLostBanner();
+                _dashScheduleReconnect(runId);
+            });
+        }
+
+        // ── Dashboard Connection Lost Banner ─────────────────
+        function _dashShowConnLostBanner() {
+            const banner = document.getElementById('dash-conn-lost-banner');
+            const text = document.getElementById('dash-conn-lost-text');
+            if (banner) banner.classList.add('show');
+            if (text) text.textContent = 'Connection lost — reconnecting...';
+            setTermStatus('', 'reconnecting...');
+        }
+
+        function _dashHideConnLostBanner() {
+            const banner = document.getElementById('dash-conn-lost-banner');
+            if (banner) banner.classList.remove('show');
+        }
+
+        // ── Dashboard Auto-Reconnect with Backoff ────────────
+        function _dashScheduleReconnect(runId) {
+            if (_dashReconnectTimer) clearTimeout(_dashReconnectTimer);
+            _dashReconnectAttempts++;
+
+            if (_dashReconnectAttempts > 5) {
+                const text = document.getElementById('dash-conn-lost-text');
+                if (text) text.textContent = 'Connection lost — tap Reconnect to retry';
+                setTermStatus('', 'disconnected');
+                return;
+            }
+
+            const delay = Math.min(_dashReconnectAttempts * 2000, 30000);
+            const text = document.getElementById('dash-conn-lost-text');
+            if (text) text.textContent = `Connection lost — retrying in ${delay / 1000}s...`;
+
+            _dashReconnectTimer = setTimeout(() => {
+                if (_dashBuildTerminal) return;
+                _dashDoConnect(runId);
+            }, delay);
+        }
+
+        function dashManualReconnect() {
+            if (!_dashStreamRunId) return;
+            if (_dashReconnectTimer) clearTimeout(_dashReconnectTimer);
+            _dashReconnectAttempts = 0;
+            const text = document.getElementById('dash-conn-lost-text');
+            if (text) text.textContent = 'Reconnecting...';
+            _dashDoConnect(_dashStreamRunId);
+        }
+        window.dashManualReconnect = dashManualReconnect;
+
+        // ── Visibility Change: Reconnect on Tab Focus ────────
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            if (!_dashStreamRunId || _dashBuildTerminal) return;
+
+            // Check if the run we're watching is still active
+            const run = runs.find(r => r.id === _dashStreamRunId);
+            if (run && (run.status === 'completed' || run.status === 'failed')) return;
+
+            // Check if current connection is dead
+            if (!liveEventSource || liveEventSource.readyState === EventSource.CLOSED) {
+                _dashReconnectAttempts = 0;
+                _dashShowConnLostBanner();
+                const text = document.getElementById('dash-conn-lost-text');
+                if (text) text.textContent = 'Reconnecting...';
+                _dashDoConnect(_dashStreamRunId);
+            }
+        });
+
+        // ── Phase Indicators ──────────────────────────────────
+        function updatePhaseIndicator(phase, status) {
+            const step = document.querySelector(`.phase-bar-step[data-phase="${phase}"]`);
+            if (step) step.setAttribute('data-status', status);
+        }
+
+        function resetPhaseIndicators() {
+            document.querySelectorAll('.phase-bar-step').forEach(s => s.setAttribute('data-status', 'pending'));
+        }
+
+        // ── Terminal ──────────────────────────────────────────
+        function appendTermContent(phase, content) {
+            phaseContent[phase] = (phaseContent[phase] || '') + content;
+            const tab = document.querySelector(`.term-tab[data-tab="${phase}"]`);
+            if (tab && phase !== activeTermTab) tab.classList.add('has-content');
+        }
+
+        function setTermContent(phase, html) {
+            // Set rendered HTML directly for the phase
+            phaseContent[phase] = '\x00' + html; // marker for raw HTML
+        }
+
+        function renderTerminal(phase) {
+            const content = document.getElementById('term-content');
+            const raw = phaseContent[phase] || '';
+
+            if (!raw) {
+                content.innerHTML = '<span style="color:var(--text-dim)">Waiting for output...</span>';
+                return;
+            }
+
+            if (raw.startsWith('\x00')) {
+                // Raw HTML content
+                content.innerHTML = raw.slice(1);
+                return;
+            }
+
+            content.innerHTML = renderMd(raw);
+        }
+
+        function switchTermTab(tab, doRender = true) {
+            activeTermTab = tab;
+            document.querySelectorAll('.term-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.tab === tab);
+                if (t.dataset.tab === tab) t.classList.remove('has-content');
+            });
+            if (doRender) {
+                renderTerminal(tab);
+                const body = document.getElementById('terminal-body');
+                body.scrollTop = body.scrollHeight;
+            }
+        }
+        window.switchTermTab = switchTermTab;
+
+        function setTermStatus(cls, text) {
+            const el = document.getElementById('term-status');
+            el.className = 'term-status ' + cls;
+            document.getElementById('term-status-text').textContent = text;
+        }
+
+        function renderMd(text) {
+            let html = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, __, code) =>
+                `<div class="code-block">${code.trim()}</div>`);
+            html = html.replace(/^### (.+)$/gm, '<div class="md-h3">$1</div>');
+            html = html.replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>');
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/`([^`]+)`/g, '<span class="inline-code">$1</span>');
+            html = html.replace(/^(✓ .+)$/gm, '<span class="check-pass">$1</span>');
+            html = html.replace(/^(✗ .+)$/gm, '<span class="check-fail">$1</span>');
+            return html;
+        }
+
+        // ── Agent Status ──────────────────────────────────────
+        async function loadAgentStatus() {
+            try {
+                const res = await fetch('/api/agents');
+                const data = await res.json();
+                if (!data.success) return;
+
+                // agentRegistry.getStatus() returns agent name → stage info
+                const agents = data.agents || {};
+                Object.entries(agents).forEach(([name, info]) => {
+                    const card = document.getElementById(`agent-${name.toLowerCase()}`);
+                    if (!card) return;
+                    const stageEl = card.querySelector('.agent-stage');
+                    if (info && info.currentStage) {
+                        card.classList.add('active');
+                        if (stageEl) stageEl.textContent = PHASE_LABELS[info.currentStage] || info.currentStage;
+                    }
+                });
+            } catch (_) {}
+        }
+
+        function activateAgent(name, stage) {
+            const card = document.getElementById(`agent-${name}`);
+            if (!card) return;
+            card.classList.add('active');
+            const stageEl = card.querySelector('.agent-stage');
+            if (stageEl) stageEl.textContent = stage;
+        }
+
+        function deactivateAgent(name) {
+            const card = document.getElementById(`agent-${name}`);
+            if (!card) return;
+            card.classList.remove('active');
+            const stageEl = card.querySelector('.agent-stage');
+            if (stageEl) stageEl.textContent = 'idle';
+        }
+
+        function deactivateAllAgents() {
+            ['planner', 'builder', 'ops', 'qa'].forEach(deactivateAgent);
+        }
+
+        // ── Queue Status ──────────────────────────────────────
+        async function loadQueueStatus() {
+            try {
+                const res = await fetch('/api/queue/status');
+                const data = await res.json();
+                if (!data.success) return;
+
+                const badge = document.getElementById('queue-badge');
+                const label = document.getElementById('queue-label');
+
+                const queueLen = data.queueLength || 0;
+                const running = data.running || 0;
+                const total = queueLen + running;
+
+                if (running > 0) {
+                    badge.classList.add('active');
+                    label.textContent = `${running} running · ${queueLen} queued`;
+                } else if (queueLen > 0) {
+                    badge.classList.remove('active');
+                    label.textContent = `${queueLen} queued`;
+                } else {
+                    badge.classList.remove('active');
+                    label.textContent = 'idle';
+                }
+            } catch (_) {}
+        }
+
+        // ── Replay Panel ──────────────────────────────────────
+        async function loadReplay(runId) {
+            const timeline = document.getElementById('replay-timeline');
+            const metaEl = document.getElementById('replay-meta');
+            timeline.innerHTML = '<div class="replay-loading">Building timeline...</div>';
+
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/replay`);
+                const data = await res.json();
+
+                if (!data.success) {
+                    timeline.innerHTML = '<div class="replay-empty">Failed to load replay.</div>';
+                    return;
+                }
+
+                const { run, timeline: items } = data;
+
+                // Meta row
+                if (run) {
+                    metaEl.innerHTML = `
+                        <span class="replay-meta-item">id <span>#${run.id.slice(0,8)}</span></span>
+                        <span class="replay-meta-item">status <span>${run.status || run.state || 'unknown'}</span></span>
+                        <span class="replay-meta-item">started <span>${formatTime(run.createdAt)}</span></span>`;
+                }
+
+                if (!items || items.length === 0) {
+                    timeline.innerHTML = '<div class="replay-empty">No timeline events yet.</div>';
+                    return;
+                }
+
+                timeline.innerHTML = items.map(item => renderTimelineItem(item, runId)).join('');
+
+            } catch (err) {
+                timeline.innerHTML = '<div class="replay-empty">Failed to load timeline.</div>';
+                console.error(err);
+            }
+        }
+
+        function renderTimelineItem(item, runId) {
+            let dotCls = 'event-' + (item.type || 'started');
+            if (item.type === 'artifact') dotCls = 'artifact';
+
+            let desc = '';
+            let artifactBadges = '';
+
+            if (item.type === 'artifact') {
+                desc = `File saved: <span style="color:var(--warning)">${escHtml(item.filename || item.path || 'file')}</span>`;
+                artifactBadges = `<div class="tl-artifact-badge" onclick="viewArtifact('${runId}', '${item.stage}', '${item.filename}')">
+                    📎 ${escHtml(item.filename || 'file')}
+                </div>`;
+            } else {
+                const statusVerbs = { started: 'started', completed: '✓ done', failed: '✗ failed', output: 'output' };
+                desc = `<strong>${escHtml(item.stage || 'build')}</strong> ${statusVerbs[item.type] || item.type}`;
+            }
+
+            return `
+            <div class="timeline-item">
+                <div class="timeline-dot ${dotCls}"></div>
+                <div class="timeline-card">
+                    <div class="timeline-card-header">
+                        <span class="tl-stage">${escHtml(item.stage || 'build')}</span>
+                        <span class="tl-time">${formatTime(item.timestamp || item.created_at)}</span>
+                    </div>
+                    <div class="tl-desc">${desc}</div>
+                    ${artifactBadges}
+                </div>
+            </div>`;
+        }
+
+        // ── Health Panel ──────────────────────────────────────
+        async function loadHealth(runId) {
+            const grid = document.getElementById('health-grid');
+            const durations = document.getElementById('stage-durations');
+
+            grid.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">Loading...</div>';
+            durations.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/health`);
+                const data = await res.json();
+
+                if (!data.success) {
+                    grid.innerHTML = '<div class="health-empty">Health data unavailable.</div>';
+                    return;
+                }
+
+                const h = data.health || {};
+
+                // Metrics cards
+                const retries = h.retries || 0;
+                const failures = h.failures || 0;
+                const escalations = h.escalations || 0;
+                const totalDuration = h.totalDurationMs ? (h.totalDurationMs / 1000).toFixed(1) + 's' : '—';
+                const stagesCompleted = h.stagesCompleted || 0;
+                const health = h.healthy !== false ? 'healthy' : 'degraded';
+
+                grid.innerHTML = `
+                    <div class="health-card">
+                        <div class="health-card-label">Status</div>
+                        <div class="health-card-value ${health === 'healthy' ? 'good' : 'error'}">${health}</div>
+                        <div class="health-card-sub">overall run health</div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-card-label">Retries</div>
+                        <div class="health-card-value ${retries > 0 ? 'warn' : ''}">${retries}</div>
+                        <div class="health-card-sub">stage retries</div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-card-label">Failures</div>
+                        <div class="health-card-value ${failures > 0 ? 'error' : ''}">${failures}</div>
+                        <div class="health-card-sub">stage failures</div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-card-label">Escalations</div>
+                        <div class="health-card-value ${escalations > 0 ? 'warn' : ''}">${escalations}</div>
+                        <div class="health-card-sub">failure escalations</div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-card-label">Duration</div>
+                        <div class="health-card-value">${totalDuration}</div>
+                        <div class="health-card-sub">total build time</div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-card-label">Steps done</div>
+                        <div class="health-card-value">${stagesCompleted}/5</div>
+                        <div class="health-card-sub">build steps</div>
+                    </div>`;
+
+                // Stage durations
+                const stageDurations = h.stageDurations || {};
+                const maxDur = Math.max(...Object.values(stageDurations).map(v => v || 0), 1);
+
+                if (Object.keys(stageDurations).length === 0) {
+                    durations.innerHTML = `<div class="stage-durations-header">Step durations</div>
+                        <div style="padding:1rem;color:var(--text-dim);font-size:.8rem">No stage data available.</div>`;
+                } else {
+                    const rows = PHASES.map(stage => {
+                        const ms = stageDurations[stage] || 0;
+                        const pct = maxDur > 0 ? (ms / maxDur * 100) : 0;
+                        const label = ms > 0 ? (ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's') : '—';
+                        const color = { plan: 'var(--phase-plan)', scaffold: 'var(--phase-scaffold)',
+                                       code: 'var(--phase-code)', save: 'var(--phase-save)',
+                                       verify: 'var(--phase-verify)' }[stage] || 'var(--accent)';
+                        return `
+                            <div class="stage-duration-row">
+                                <span class="sd-stage">${stage}</span>
+                                <div class="sd-bar-wrap">
+                                    <div class="sd-bar" style="width:${pct}%;background:${color}"></div>
+                                </div>
+                                <span class="sd-time">${label}</span>
+                            </div>`;
+                    }).join('');
+
+                    durations.innerHTML = `<div class="stage-durations-header">Step breakdown</div>${rows}`;
+                }
+
+            } catch (err) {
+                grid.innerHTML = '<div class="health-empty">Failed to load health data.</div>';
+                console.error(err);
+            }
+        }
+
+        // ── QA Panel ──────────────────────────────────────────
+        async function loadQA(runId) {
+            const summary = document.getElementById('qa-summary-row');
+            const list = document.getElementById('issues-list');
+
+            summary.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">Loading...</div>';
+            list.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/issues`);
+                const data = await res.json();
+
+                if (!data.success) {
+                    summary.innerHTML = '';
+                    list.innerHTML = '<div class="qa-empty">Failed to load QA data.</div>';
+                    return;
+                }
+
+                const issues = data.issues || [];
+                const total = issues.length;
+
+                // Count by severity
+                const counts = { critical: 0, warning: 0, info: 0 };
+                issues.forEach(i => {
+                    const sev = (i.severity || 'info').toLowerCase();
+                    if (sev in counts) counts[sev]++;
+                    else counts.info++;
+                });
+
+                // Update QA tab badge
+                const badge = document.getElementById('qa-badge');
+                if (total > 0) {
+                    badge.style.display = '';
+                    badge.textContent = total;
+                    badge.className = 'tab-badge' + (counts.critical > 0 ? '' : ' green');
+                } else {
+                    badge.style.display = 'none';
+                }
+
+                // Summary cards
+                summary.innerHTML = `
+                    <div class="qa-summary-card">
+                        <div class="qa-summary-label">Total Issues</div>
+                        <div class="qa-summary-value ${total > 0 ? (counts.critical > 0 ? 'critical' : 'warning') : 'clean'}">${total}</div>
+                    </div>
+                    <div class="qa-summary-card">
+                        <div class="qa-summary-label">Critical</div>
+                        <div class="qa-summary-value critical">${counts.critical}</div>
+                    </div>
+                    <div class="qa-summary-card">
+                        <div class="qa-summary-label">Warnings</div>
+                        <div class="qa-summary-value warning">${counts.warning}</div>
+                    </div>`;
+
+                if (total === 0) {
+                    list.innerHTML = `
+                        <div class="qa-clean">
+                            <span style="font-size:2rem">✓</span>
+                            No issues flagged — clean run
+                        </div>`;
+                    return;
+                }
+
+                list.innerHTML = issues.map(issue => {
+                    const sev = (issue.severity || 'info').toLowerCase();
+                    return `
+                        <div class="issue-card">
+                            <span class="issue-severity ${sev}">${sev}</span>
+                            <div class="issue-body">
+                                <div class="issue-desc">${escHtml(issue.description || issue.message || 'No description')}</div>
+                                <div class="issue-meta">
+                                    <span class="issue-stage">${escHtml(issue.stage || 'verify')}</span>
+                                    ${issue.created_at ? `<span class="issue-time">${formatTime(issue.created_at)}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+
+            } catch (err) {
+                summary.innerHTML = '';
+                list.innerHTML = '<div class="qa-empty">Failed to load QA issues.</div>';
+                console.error(err);
+            }
+        }
+
+        // ── Constraint Intelligence Panel ────────────────────
+        async function loadConstraints(runId) {
+            if (!runId) return;
+
+            const noSel = document.getElementById('no-selection-constraints');
+            const content = document.getElementById('constraints-content');
+            const intentCard = document.getElementById('ci-intent-card');
+            const violSection = document.getElementById('ci-violations-section');
+            const violCard = document.getElementById('ci-violations-card');
+            const learningSection = document.getElementById('ci-learning-section');
+            const learningCard = document.getElementById('ci-learning-card');
+            const decisionSection = document.getElementById('ci-decision-section');
+            const decisionCard = document.getElementById('ci-decision-card');
+
+            // Show content area
+            noSel.style.display = 'none';
+            content.style.display = '';
+            intentCard.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">Loading...</div>';
+            violSection.style.display = 'none';
+            learningSection.style.display = 'none';
+            decisionSection.style.display = 'none';
+
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/constraints`);
+                const data = await res.json();
+
+                if (!data.success) {
+                    intentCard.innerHTML = '<div class="constraint-empty">No constraint data available for this run.</div>';
+                    return;
+                }
+
+                const { prediction, violations, decision, learningAdjustments } = data;
+
+                // ── Intent Classification ──
+                if (!prediction) {
+                    intentCard.innerHTML = '<div class="constraint-empty" style="padding:.75rem 0">No prediction data — this run may predate the constraint system.</div>';
+                } else {
+                    const constraints = prediction.predicted_constraints || [];
+                    // Build constraint flags
+                    const flagKeys = ['frontend', 'server', 'db', 'auth', 'api'];
+                    const constraintMap = {};
+                    if (Array.isArray(constraints)) {
+                        constraints.forEach(c => {
+                            if (typeof c === 'string') constraintMap[c] = true;
+                            else if (typeof c === 'object') Object.assign(constraintMap, c);
+                        });
+                    } else if (typeof constraints === 'object') {
+                        Object.assign(constraintMap, constraints);
+                    }
+
+                    const flagsHtml = flagKeys.map(k => {
+                        const on = constraintMap[k] === true || constraintMap[k] === 'true';
+                        return `<span class="constraint-flag ${on ? 'on' : 'off'}">${k}=${on ? 'true' : 'false'}</span>`;
+                    }).join('');
+
+                    const conf = prediction.confidence != null ? (prediction.confidence * 100).toFixed(0) + '%' : '—';
+                    const entropy = prediction.entropy != null ? prediction.entropy.toFixed(3) : null;
+                    const isLocked = decision && decision.final_constraints && decision.final_constraints.expansion_lock;
+                    const committed = prediction.committed;
+
+                    intentCard.innerHTML = `
+                        <div class="constraint-intent-row">
+                            <span class="constraint-intent-class">${escHtml(prediction.task_type || '—')}</span>
+                            <span class="constraint-confidence">confidence: ${conf}</span>
+                            ${entropy != null ? `<span class="constraint-confidence">entropy: ${entropy}</span>` : ''}
+                            ${committed === false ? '<span style="font-family:\'DM Mono\',monospace;font-size:.75rem;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);padding:.1rem .4rem;border-radius:3px">soft expansion</span>' : ''}
+                        </div>
+                        <div class="constraint-flags">${flagsHtml}</div>
+                        ${isLocked ? '<div class="constraint-expansion-lock locked">⚠ Expansion Lock: enabled — scope frozen</div>' : '<div class="constraint-expansion-lock">Expansion Lock: off</div>'}
+                    `;
+
+                    // Update violations badge
+                    const badge = document.getElementById('constraints-badge');
+                    if (violations && violations.length > 0) {
+                        badge.style.display = '';
+                        badge.textContent = violations.length;
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                }
+
+                // ── Violations ──
+                if (violations && violations.length > 0) {
+                    violSection.style.display = '';
+                    violCard.innerHTML = violations.map(v => `
+                        <div class="violation-row">
+                            <span class="violation-type">${escHtml(v.violation_type || '—')}</span>
+                            ${v.violated_layer ? `<span class="violation-layer">${escHtml(v.violated_layer)}</span>` : ''}
+                            <div class="violation-severity-bar">
+                                <div class="violation-severity-fill" style="width:${((v.severity||0)*100).toFixed(0)}%"></div>
+                            </div>
+                            <span style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--text-dim)">${((v.severity||0)*100).toFixed(0)}%</span>
+                        </div>
+                    `).join('');
+                }
+
+                // ── Learning Adjustments ──
+                if (learningAdjustments && learningAdjustments.length > 0) {
+                    learningSection.style.display = '';
+                    learningCard.innerHTML = learningAdjustments.map(adj => {
+                        const w = adj.weight != null ? parseFloat(adj.weight) : null;
+                        const wStr = w != null ? (w >= 0 ? '+' : '') + w.toFixed(3) : '—';
+                        const wCls = w != null && w < 0 ? 'negative' : '';
+                        return `
+                            <div class="learning-row">
+                                <span class="learning-key">${escHtml(adj.key || adj.constraint_key || '—')}</span>
+                                <span class="learning-weight ${wCls}">weight ${wStr}</span>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                // ── Decision Trace ──
+                if (decision) {
+                    decisionSection.style.display = '';
+                    const fc = decision.final_constraints || {};
+                    const fcStr = typeof fc === 'string' ? fc : JSON.stringify(fc, null, 2);
+                    decisionCard.innerHTML = `
+                        <div style="margin-bottom:.5rem">
+                            <span style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--text-muted)">Classified as:</span>
+                            <span style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--text);margin-left:.5rem">${escHtml(decision.classified_task_type || '—')}</span>
+                        </div>
+                        <details style="margin-top:.5rem">
+                            <summary style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--text-dim);cursor:pointer">Final constraint object</summary>
+                            <pre style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--text-muted);margin-top:.5rem;white-space:pre-wrap;word-break:break-all">${escHtml(fcStr)}</pre>
+                        </details>
+                    `;
+                }
+
+            } catch (err) {
+                intentCard.innerHTML = '<div class="constraint-empty">Failed to load constraint data.</div>';
+                console.error('[Constraints] Load error:', err);
+            }
+        }
+
+        // ── Constraint Health Summary ─────────────────────────
+        async function loadConstraintHealth() {
+            try {
+                const res = await fetch('/api/constraints/health');
+                const data = await res.json();
+                if (!data.success) return;
+
+                const bar = document.getElementById('constraint-health-bar');
+                const pills = document.getElementById('constraint-health-pills');
+                const violRate = document.getElementById('constraint-health-viol-rate');
+
+                const breakdown = data.intentClassBreakdown || [];
+                if (breakdown.length === 0) return; // No constraint data yet — hide bar
+
+                pills.innerHTML = breakdown.map(b => `
+                    <span class="chp"><span class="chp-count">${b.count}</span> ${escHtml(b.task_type || '—')}</span>
+                `).join('');
+
+                const vr = data.violationRate || {};
+                const total = parseInt(vr.totalRuns) || 0;
+                const withViol = parseInt(vr.runsWithViolations) || 0;
+                if (total > 0) {
+                    const rate = ((withViol / total) * 100).toFixed(0);
+                    violRate.textContent = `${rate}% w/ violations`;
+                }
+
+                bar.style.display = '';
+            } catch (_) {
+                // Constraint health not available — fail silently
+            }
+        }
+
+        // ── Economics Panel ───────────────────────────────────
+
+        const PHASE_COLORS = {
+            plan:     'rgba(20,184,166,0.38)',
+            scaffold: 'rgba(20,184,166,0.54)',
+            code:     'rgba(20,184,166,0.70)',
+            save:     'rgba(20,184,166,0.85)',
+            verify:   '#14b8a6',
+        };
+        const AGENT_COLORS = {
+            PlannerAgent: 'rgba(20,184,166,0.38)',
+            BuilderAgent: 'rgba(20,184,166,0.60)',
+            OpsAgent:     'rgba(20,184,166,0.80)',
+            QAAgent:      '#14b8a6',
+        };
+
+        function fmtUsd(n) {
+            if (n === null || n === undefined || isNaN(n)) return '—';
+            if (n < 0.001) return `$${(n * 1000).toFixed(3)}m`;
+            if (n < 1) return `$${n.toFixed(4)}`;
+            return `$${n.toFixed(3)}`;
+        }
+
+        function fmtPct(n) {
+            if (n === null || n === undefined) return '—';
+            return `${n.toFixed(1)}%`;
+        }
+
+        function renderCostBars(container, items, colorMap) {
+            if (!items || Object.keys(items).length === 0) {
+                container.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">No cost data yet.</div>';
+                return;
+            }
+            const maxCost = Math.max(...Object.values(items).map(d => d.costUsd || 0));
+            const totalCost = Object.values(items).reduce((s, d) => s + (d.costUsd || 0), 0);
+
+            container.innerHTML = Object.entries(items).map(([key, d]) => {
+                const cost = d.costUsd || 0;
+                const pct = maxCost > 0 ? (cost / maxCost) * 100 : 0;
+                const pctOfTotal = totalCost > 0 ? (cost / totalCost) * 100 : 0;
+                const color = colorMap[key] || 'var(--accent)';
+                const tokens = d.inputTokens != null
+                    ? `${(d.inputTokens || 0).toLocaleString()}in + ${(d.outputTokens || 0).toLocaleString()}out`
+                    : '';
+                return `<div class="cost-bar-row" title="${tokens}">
+                    <span class="cost-bar-label">${key}</span>
+                    <div class="cost-bar-track">
+                        <div class="cost-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></div>
+                    </div>
+                    <span class="cost-bar-value">${fmtUsd(cost)}</span>
+                    <span class="cost-bar-pct">${fmtPct(pctOfTotal)}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function renderBudgetBar(costs) {
+            const bar = document.getElementById('budget-status-bar');
+            const fill = document.getElementById('budget-fill');
+            const text = document.getElementById('budget-status-text');
+
+            if (!costs || (!costs.budgetCap && !costs.budgetWarning)) {
+                bar.style.display = 'none';
+                return;
+            }
+
+            bar.style.display = 'flex';
+            const cap = costs.budgetCap || costs.budgetWarning || 1;
+            const total = costs.totalCostUsd || 0;
+            const pct = Math.min((total / cap) * 100, 100);
+
+            fill.style.width = `${pct.toFixed(1)}%`;
+            text.textContent = `${fmtUsd(total)} / ${fmtUsd(cap)}`;
+
+            bar.className = 'budget-status-bar';
+            fill.className = 'budget-fill';
+
+            if (costs.budgetCap && total >= costs.budgetCap) {
+                bar.classList.add('exceeded');
+                fill.classList.add('exceeded');
+            } else if (costs.budgetWarning && total >= costs.budgetWarning) {
+                bar.classList.add('warning');
+                fill.classList.add('warning');
+            }
+        }
+
+        async function loadEconomics(runId) {
+            // Always load the aggregate summary
+            loadCostsSummary();
+
+            const runSection = document.getElementById('econ-run-section');
+
+            if (!runId) {
+                runSection.style.display = 'none';
+                return;
+            }
+
+            runSection.style.display = 'block';
+            document.getElementById('run-phase-bars').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">Loading...</div>';
+            document.getElementById('run-agent-bars').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">Loading...</div>';
+
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/costs`);
+                if (!res.ok) {
+                    document.getElementById('run-phase-bars').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">No cost data available for this run.</div>';
+                    document.getElementById('run-agent-bars').innerHTML = '';
+                    document.getElementById('budget-status-bar').style.display = 'none';
+                    return;
+                }
+
+                const { costs } = await res.json();
+                if (!costs) {
+                    document.getElementById('run-phase-bars').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">No cost data available.</div>';
+                    return;
+                }
+
+                // Budget bar
+                renderBudgetBar(costs);
+
+                // Phase bars
+                renderCostBars(document.getElementById('run-phase-bars'), costs.byStage, PHASE_COLORS);
+
+                // Token summary
+                const totalIn = Object.values(costs.byStage || {}).reduce((s, d) => s + (d.inputTokens || 0), 0);
+                const totalOut = Object.values(costs.byStage || {}).reduce((s, d) => s + (d.outputTokens || 0), 0);
+                document.getElementById('run-token-summary').innerHTML = `
+                    <span class="token-pill">↑ ${totalIn.toLocaleString()} input tokens</span>
+                    <span class="token-pill">↓ ${totalOut.toLocaleString()} output tokens</span>
+                    <span class="token-pill">Total: ${fmtUsd(costs.totalCostUsd)}</span>
+                `;
+
+                // Agent bars
+                renderCostBars(document.getElementById('run-agent-bars'), costs.byAgent, AGENT_COLORS);
+
+            } catch (err) {
+                document.getElementById('run-phase-bars').innerHTML = `<div style="color:var(--error);font-size:.8rem">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function loadCostsSummary() {
+            try {
+                const res = await fetch('/api/costs/summary?limit=30');
+                const { summary } = await res.json();
+
+                if (!summary || summary.totalRuns === 0) {
+                    document.getElementById('econ-total-spend').textContent = '$0.000';
+                    document.getElementById('econ-run-count').textContent = 'no runs with cost data yet';
+                    document.getElementById('econ-avg-cost').textContent = '—';
+                    document.getElementById('econ-cost-per-success').textContent = '—';
+                    document.getElementById('econ-success-rate').textContent = '—';
+                    document.getElementById('econ-efficiency').textContent = '—';
+                    document.getElementById('cost-trend-chart').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem;align-self:center;padding:.5rem">No runs yet.</div>';
+                    document.getElementById('summary-agent-bars').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">No data yet.</div>';
+                    document.getElementById('summary-phase-bars').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem">No data yet.</div>';
+                    return;
+                }
+
+                // Stat cards
+                document.getElementById('econ-total-spend').textContent = fmtUsd(summary.totalSpendUsd);
+                document.getElementById('econ-run-count').textContent = `across ${summary.totalRuns} run${summary.totalRuns !== 1 ? 's' : ''}`;
+                document.getElementById('econ-avg-cost').textContent = fmtUsd(summary.avgCostPerRunUsd);
+                document.getElementById('econ-cost-per-success').textContent = fmtUsd(summary.costPerSuccessfulRunUsd);
+                document.getElementById('econ-success-rate').textContent = `${fmtPct(summary.successRate)} success rate`;
+                document.getElementById('econ-efficiency').textContent = fmtPct(summary.successRate);
+
+                // Trend chart
+                const trend = summary.costTrend || [];
+                if (trend.length === 0) {
+                    document.getElementById('cost-trend-chart').innerHTML = '<div style="color:var(--text-dim);font-size:.8rem;align-self:center">No trend data.</div>';
+                } else {
+                    const maxCost = Math.max(...trend.map(t => t.costUsd || 0), 0.0001);
+                    const chartEl = document.getElementById('cost-trend-chart');
+                    chartEl.innerHTML = trend.slice(-30).map(t => {
+                        const pct = Math.max((t.costUsd / maxCost) * 68, 2); // max 68px height
+                        const stateClass = t.state === 'completed' ? 'success' : (t.state === 'failed' ? 'failed' : 'running');
+                        const date = new Date(t.date).toLocaleDateString();
+                        const tip = `${date}: ${fmtUsd(t.costUsd)}`;
+                        return `<div class="cost-trend-bar-wrap">
+                            <div class="cost-trend-bar ${stateClass}" style="height:${pct.toFixed(0)}px" data-tip="${tip}"></div>
+                        </div>`;
+                    }).join('');
+                }
+
+                // Agent breakdown
+                renderCostBars(document.getElementById('summary-agent-bars'), summary.agentBreakdown, AGENT_COLORS);
+                renderCostBars(document.getElementById('summary-phase-bars'), summary.phaseBreakdown, PHASE_COLORS);
+
+            } catch (err) {
+                console.error('[Economics] Failed to load summary:', err);
+            }
+        }
+
+        // ── Panel Tab Switching ───────────────────────────────
+        function switchPanelTab(tab) {
+            activePanelTab = tab;
+            document.querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
+
+            if (tab === 'economics') {
+                loadEconomics(selectedRunId);
+                return;
+            }
+
+            if (tab === 'constraints') {
+                if (selectedRunId) loadConstraints(selectedRunId);
+                return;
+            }
+
+            if (!selectedRunId) return;
+
+            if (tab === 'replay') loadReplay(selectedRunId);
+            if (tab === 'health') loadHealth(selectedRunId);
+            if (tab === 'qa') loadQA(selectedRunId);
+        }
+        window.switchPanelTab = switchPanelTab;
+
+        // ── Retry + Intervention Buttons ──────────────────────
+        function updateRetryBtn(run) {
+            const retryBtn = document.getElementById('retry-btn');
+            const pauseBtn = document.getElementById('dash-pause-btn');
+            const resumeBtn = document.getElementById('dash-resume-btn');
+            const injectBtn = document.getElementById('dash-inject-btn');
+            const overrideBtn = document.getElementById('dash-override-btn');
+            const s = run ? (run.status || run.state || '').toLowerCase() : '';
+
+            // Retry: only for failed runs
+            if (s === 'failed') retryBtn.classList.add('show');
+            else retryBtn.classList.remove('show');
+
+            // Pause: only for running runs
+            if (s === 'running') pauseBtn.classList.add('show');
+            else pauseBtn.classList.remove('show');
+
+            // Resume + Inject + Override: only for paused runs (or running for inject)
+            if (s === 'paused') {
+                resumeBtn.classList.add('show');
+                injectBtn.classList.add('show');
+                overrideBtn.classList.add('show');
+                // Show inject/override panels
+                document.getElementById('dash-inject-panel').classList.add('show');
+                document.getElementById('dash-paused-banner').classList.add('show');
+            } else {
+                resumeBtn.classList.remove('show');
+                // Show inject/override for running runs too
+                if (s === 'running') {
+                    injectBtn.classList.add('show');
+                    overrideBtn.classList.add('show');
+                } else {
+                    injectBtn.classList.remove('show');
+                    overrideBtn.classList.remove('show');
+                    document.getElementById('dash-inject-panel').classList.remove('show');
+                    document.getElementById('dash-override-panel').classList.remove('show');
+                }
+                document.getElementById('dash-paused-banner').classList.remove('show');
+            }
+        }
+
+        async function retryRun() {
+            if (!selectedRunId) return;
+            const btn = document.getElementById('retry-btn');
+            btn.disabled = true;
+            btn.textContent = '↩ Retrying...';
+
+            try {
+                const res = await fetch(`/api/pipeline/${selectedRunId}/retry`, { method: 'POST' });
+                const data = await res.json();
+
+                if (!data.success) {
+                    showToast(data.message || 'Retry failed', 'error');
+                } else {
+                    showToast('Build retry started', 'success');
+                    loadRuns(false);
+                    loadLiveView(selectedRunId, { status: 'running' });
+                }
+            } catch (err) {
+                showToast('Retry request failed', 'error');
+            }
+
+            btn.disabled = false;
+            btn.textContent = '↩ Retry';
+        }
+        window.retryRun = retryRun;
+
+        // ── Intervention Controls ─────────────────────────────
+        let dashSelectedAgent = null;
+
+        async function dashPause() {
+            if (!selectedRunId) return;
+            try {
+                const res = await fetch(`/api/pipeline/${selectedRunId}/pause`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) showToast(data.message, 'error');
+            } catch (e) {
+                showToast('Pause request failed', 'error');
+            }
+        }
+        window.dashPause = dashPause;
+
+        async function dashResume() {
+            if (!selectedRunId) return;
+            try {
+                const res = await fetch(`/api/pipeline/${selectedRunId}/resume`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) showToast(data.message, 'error');
+            } catch (e) {
+                showToast('Resume request failed', 'error');
+            }
+        }
+        window.dashResume = dashResume;
+
+        function dashToggleInject() {
+            const panel = document.getElementById('dash-inject-panel');
+            panel.classList.toggle('show');
+            if (panel.classList.contains('show')) {
+                document.getElementById('dash-override-panel').classList.remove('show');
+                document.getElementById('dash-inject-input').focus();
+            }
+        }
+        window.dashToggleInject = dashToggleInject;
+
+        async function dashSendInject() {
+            if (!selectedRunId) return;
+            const input = document.getElementById('dash-inject-input');
+            const btn = document.getElementById('dash-inject-send');
+            const message = input.value.trim();
+            if (!message) return;
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/pipeline/${selectedRunId}/inject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    input.value = '';
+                } else {
+                    showToast(data.message, 'error');
+                }
+            } catch (e) {
+                showToast('Note failed to send', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+        window.dashSendInject = dashSendInject;
+
+        document.getElementById('dash-inject-input')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') dashSendInject();
+        });
+
+        function dashToggleOverride() {
+            const panel = document.getElementById('dash-override-panel');
+            panel.classList.toggle('show');
+            if (panel.classList.contains('show')) {
+                document.getElementById('dash-inject-panel').classList.remove('show');
+            }
+        }
+        window.dashToggleOverride = dashToggleOverride;
+
+        function dashSelectAgent(btn) {
+            document.querySelectorAll('.dash-override-agent').forEach(b => b.classList.remove('sel'));
+            btn.classList.add('sel');
+            dashSelectedAgent = btn.dataset.agent;
+        }
+        window.dashSelectAgent = dashSelectAgent;
+
+        async function dashSendOverride() {
+            if (!selectedRunId || !dashSelectedAgent) {
+                showToast('Select a step first', 'error');
+                return;
+            }
+            const input = document.getElementById('dash-override-input');
+            const btn = document.getElementById('dash-override-send');
+            const prompt = input.value.trim();
+            if (!prompt) return;
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/pipeline/${selectedRunId}/override`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent: dashSelectedAgent, prompt })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    input.value = '';
+                    document.getElementById('dash-override-panel').classList.remove('show');
+                } else {
+                    showToast(data.message, 'error');
+                }
+            } catch (e) {
+                showToast('Special instructions failed', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+        window.dashSendOverride = dashSendOverride;
+
+        // ── Billing / Plan Status ──────────────────────────────
+        let _userCredits   = null;
+        let _userPlan      = null;
+
+        async function loadBillingStatus() {
+            try {
+                const r = await fetch('/api/billing/status');
+                if (!r.ok) return;
+                const d = await r.json();
+                if (!d.success) return;
+                _userCredits = d.task_credits;
+                _userPlan    = d.subscription_status;
+                const _isAdmin = d.is_admin === true;
+
+                const badge   = document.getElementById('plan-badge');
+                const credits = document.getElementById('plan-credits-badge');
+                const upBtn   = document.getElementById('upgrade-btn');
+                const mgBtn   = document.getElementById('manage-sub-btn');
+
+                if (_isAdmin) {
+                    // Admin: unlimited builds, no upgrade prompt
+                    credits.textContent = '⚡ Admin  ·  ∞ Unlimited';
+                    credits.style.color = 'var(--text-dim)';
+                    upBtn.style.display = 'none';
+                    mgBtn.style.display = 'none';
+                } else {
+                    const planLabel = _userPlan === 'active'   ? '● Pro'
+                                    : _userPlan === 'past_due' ? '⚠ Past due'
+                                    :                            '○ Trial';
+                    credits.textContent = `${planLabel}  ·  ${_userCredits} credit${_userCredits !== 1 ? 's' : ''}`;
+                    credits.style.color = _userCredits === 0 ? 'var(--error)' : 'var(--text-dim)';
+
+                    if (_userPlan !== 'active') {
+                        upBtn.style.display = 'inline-flex';
+                        mgBtn.style.display = 'none';
+                    } else {
+                        upBtn.style.display = 'none';
+                        mgBtn.style.display = 'inline-flex';
+                    }
+                }
+
+                badge.style.display = 'flex';
+            } catch (_) { /* non-fatal */ }
+        }
+
+        // ── Upgrade modal ──────────────────────────────────────
+        function startUpgrade(e) {
+            if (e) e.preventDefault();
+            document.getElementById('upgrade-modal').classList.add('show');
+        }
+        window.startUpgrade = startUpgrade;
+
+        function closeUpgradeModal() {
+            document.getElementById('upgrade-modal').classList.remove('show');
+        }
+        window.closeUpgradeModal = closeUpgradeModal;
+
+        function closeUpgradeModalIfOutside(e) {
+            if (e.target === document.getElementById('upgrade-modal')) closeUpgradeModal();
+        }
+        window.closeUpgradeModalIfOutside = closeUpgradeModalIfOutside;
+
+        async function redirectToCheckout() {
+            const btn = document.getElementById('upgrade-checkout-btn');
+            btn.disabled  = true;
+            btn.textContent = 'Redirecting...';
+            try {
+                const r = await fetch('/api/billing/create-checkout', { method: 'POST' });
+                const d = await r.json();
+                if (d.success && d.url) {
+                    window.location.href = d.url;
+                } else {
+                    showToast('Could not start checkout. Please try again.', 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Subscribe for $49/month →';
+                }
+            } catch (err) {
+                showToast('Checkout failed. Please try again.', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Subscribe for $49/month →';
+            }
+        }
+        window.redirectToCheckout = redirectToCheckout;
+
+        async function manageSubscription(e) {
+            if (e) e.preventDefault();
+            try {
+                const r = await fetch('/api/billing/portal');
+                const d = await r.json();
+                if (d.success && d.url) window.open(d.url, '_blank');
+            } catch (_) {
+                showToast('Could not open subscription portal.', 'error');
+            }
+        }
+        window.manageSubscription = manageSubscription;
+
+        // Activate subscription if returning from Stripe checkout
+        (async () => {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('subscription') === 'active') {
+                try {
+                    const r = await fetch('/api/billing/activate', { method: 'POST' });
+                    const d = await r.json();
+                    if (d.success && !d.already_active) {
+                        showToast(`🎉 Subscription active! ${d.task_credits} credits added.`, 'success');
+                        loadBillingStatus();
+                    }
+                } catch (_) { /* non-fatal */ }
+                // Clean up query string without reloading
+                const clean = window.location.pathname + window.location.hash;
+                window.history.replaceState({}, '', clean);
+            }
+        })();
+
+        // Load billing status on page mount
+        loadBillingStatus();
+
+        // ── Run Modal ─────────────────────────────────────────
+        function openRunModal() {
+            // Gate on credits — show upgrade prompt if exhausted
+            if (_userCredits !== null && _userCredits <= 0) {
+                startUpgrade(null);
+                return;
+            }
+            document.getElementById('run-modal').classList.add('show');
+            setTimeout(() => document.getElementById('modal-prompt').focus(), 100);
+        }
+        window.openRunModal = openRunModal;
+
+        function closeRunModal() {
+            document.getElementById('run-modal').classList.remove('show');
+            document.getElementById('modal-prompt').value = '';
+            document.getElementById('modal-budget-cap').value = '';
+            document.getElementById('modal-budget-warning').value = '';
+            document.getElementById('modal-run-btn').disabled = false;
+        }
+        window.closeRunModal = closeRunModal;
+
+        function closeRunModalIfOutside(e) {
+            if (e.target === document.getElementById('run-modal')) closeRunModal();
+        }
+        window.closeRunModalIfOutside = closeRunModalIfOutside;
+
+        document.getElementById('modal-prompt').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitRun();
+            if (e.key === 'Escape') closeRunModal();
+        });
+
+        async function submitRun() {
+            const prompt = document.getElementById('modal-prompt').value.trim();
+            if (!prompt) return;
+
+            const btn = document.getElementById('modal-run-btn');
+            btn.disabled = true;
+            btn.textContent = 'Launching...';
+
+            // Read optional budget controls
+            const capVal  = parseFloat(document.getElementById('modal-budget-cap').value);
+            const warnVal = parseFloat(document.getElementById('modal-budget-warning').value);
+            const body = {
+                prompt,
+                budgetCap:     isFinite(capVal)  && capVal > 0  ? capVal  : null,
+                budgetWarning: isFinite(warnVal) && warnVal > 0 ? warnVal : null,
+            };
+
+            try {
+                const res = await fetch('/api/pipeline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await res.json();
+
+                if (res.status === 402 && data.code === 'no_credits') {
+                    // Out of credits — close build modal, open upgrade prompt
+                    closeRunModal();
+                    startUpgrade(null);
+                    return;
+                }
+
+                if (!data.success) throw new Error(data.message);
+
+                // Refresh credit count after successful run start
+                _userCredits = (_userCredits !== null) ? Math.max(0, _userCredits - 1) : null;
+                loadBillingStatus();
+
+                closeRunModal();
+                await loadRuns(false);
+                selectRun(data.id);
+                showToast('Build started!', 'success');
+
+            } catch (err) {
+                showToast(err.message || 'Failed to launch', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Launch →';
+            }
+        }
+        window.submitRun = submitRun;
+
+        // ── Artifact Viewer ───────────────────────────────────
+        async function viewArtifact(runId, stage, filename) {
+            document.getElementById('artifact-viewer').classList.add('show');
+            document.getElementById('artifact-modal-title').textContent = `${stage}/${filename}`;
+            document.getElementById('artifact-code').textContent = 'Loading...';
+
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/artifacts/${stage}/${filename}`);
+                const data = await res.json();
+
+                if (!data.success) {
+                    document.getElementById('artifact-code').textContent = 'Failed to load artifact.';
+                    return;
+                }
+
+                document.getElementById('artifact-code').textContent = data.content || '(empty)';
+            } catch (err) {
+                document.getElementById('artifact-code').textContent = 'Error loading artifact.';
+            }
+        }
+        window.viewArtifact = viewArtifact;
+
+        function closeArtifactViewer() {
+            document.getElementById('artifact-viewer').classList.remove('show');
+        }
+        window.closeArtifactViewer = closeArtifactViewer;
+
+        function closeArtifactViewerIfOutside(e) {
+            if (e.target === document.getElementById('artifact-viewer')) closeArtifactViewer();
+        }
+        window.closeArtifactViewerIfOutside = closeArtifactViewerIfOutside;
+
+        // ── Toast ─────────────────────────────────────────────
+        let toastTimer = null;
+        function showToast(msg, type = 'success') {
+            const el = document.getElementById('toast');
+            el.className = `toast show ${type}`;
+            const icon = type === 'success' ? '✓ ' : type === 'warning' ? '⚠ ' : '✗ ';
+            el.textContent = icon + msg;
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+        }
+        window.showToast = showToast;
+
+        // ── Helpers ───────────────────────────────────────────
+        function escHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function formatRelTime(ts) {
+            if (!ts) return '';
+            const diff = Date.now() - new Date(ts).getTime();
+            const s = Math.floor(diff / 1000);
+            if (s < 60) return s + 's ago';
+            const m = Math.floor(s / 60);
+            if (m < 60) return m + 'm ago';
+            const h = Math.floor(m / 60);
+            if (h < 24) return h + 'h ago';
+            return Math.floor(h / 24) + 'd ago';
+        }
+
+        function formatTime(ts) {
+            if (!ts) return '—';
+            const d = new Date(ts);
+            return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        // Auto-select the most recent run on load
+        setTimeout(async () => {
+            if (runs.length > 0) {
+                selectRun(runs[0].id);
+            }
+        }, 400);
+
+        // ── Analytics Stats Bar ─────────────────────────────────────────────
+        // Fetch 7-day summary and populate the slim bar below the nav.
+        (async () => {
+            try {
+                const r = await fetch('/api/analytics/summary');
+                if (!r.ok) return;
+                const data = await r.json();
+                if (!data.success) return;
+
+                // Builds today = count of PIPELINE_STARTED in today's daily slot
+                const todayStr = new Date().toISOString().slice(0, 10);
+                const todayRow = (data.daily || []).find(d => d.date === todayStr);
+                const buildsToday = todayRow ? todayRow.started : 0;
+
+                // Success rate
+                const rate = data.completion_rate != null
+                    ? Math.round(data.completion_rate * 100) + '%'
+                    : '—';
+
+                // Avg duration
+                let avgTime = '—';
+                if (data.avg_duration_ms) {
+                    const secs = Math.round(data.avg_duration_ms / 1000);
+                    avgTime = secs >= 60
+                        ? Math.floor(secs / 60) + 'm ' + (secs % 60) + 's'
+                        : secs + 's';
+                }
+
+                // Active users
+                const activeUsers = data.totals?.active_users ?? '—';
+
+                document.getElementById('stat-builds-today').innerHTML =
+                    `<span style="color:var(--accent)">●</span> <strong style="color:var(--text)">${buildsToday}</strong> builds today`;
+                document.getElementById('stat-success-rate').innerHTML =
+                    `<strong style="color:${data.completion_rate >= 0.8 ? 'var(--accent)' : data.completion_rate >= 0.5 ? 'var(--warning)' : 'var(--error)'}">${rate}</strong> success rate`;
+                document.getElementById('stat-avg-duration').innerHTML =
+                    `<strong style="color:var(--text)">${avgTime}</strong> avg build time`;
+                document.getElementById('stat-active-users').innerHTML =
+                    `<strong style="color:var(--text)">${activeUsers}</strong> active users (7d)`;
+
+                document.getElementById('analytics-bar').style.display = 'flex';
+            } catch (e) {
+                // Non-fatal — stats bar stays hidden if fetch fails
+            }
+        })();
+
+    })();
+    </script>
+
+    <script src="/sidebar.js"></script>
+</body>
+</html>

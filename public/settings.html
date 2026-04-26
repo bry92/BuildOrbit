@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Keys — BuildOrbit</title>
+  <link rel="stylesheet" href="/css/buildorbit.css?v=20260426e">
+</head>
+<body class="page-settings">
+
+<!-- Top Nav -->
+<nav class="topnav">
+  <div class="topnav-left">
+    <a href="/dashboard" class="logo">
+      <span class="logo-dot"></span>
+      BuildOrbit
+    </a>
+    <div class="breadcrumb">
+      <span class="breadcrumb-sep">/</span>
+      <a href="/dashboard">Dashboard</a>
+      <span class="breadcrumb-sep">/</span>
+      <span class="breadcrumb-current">API Keys</span>
+    </div>
+  </div>
+  <div class="topnav-right">
+    <a href="/dashboard" class="btn-ghost">← Dashboard</a>
+  </div>
+</nav>
+
+<!-- Main -->
+<main class="main">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div class="page-title">
+      <div class="page-title-icon">🔑</div>
+      API Keys
+    </div>
+    <p class="page-desc">
+      Generate API keys to authenticate the BuildOrbit CLI and headless integrations.
+      Keys are shown once — copy and store them securely.
+    </p>
+  </div>
+
+  <!-- CLI Quick Start -->
+  <div class="quickstart">
+    <div class="quickstart-title">CLI Quick Start</div>
+    <div class="code-steps">
+      <div class="code-step">
+        <div class="step-num">1</div>
+        <span class="code-line">curl -sL https://buildorbit.polsia.app/cli/install.sh | sh</span>
+      </div>
+      <div class="code-step">
+        <div class="step-num">2</div>
+        <span class="step-desc">Generate a key below, then run:</span>
+      </div>
+      <div class="code-step">
+        <div class="step-num"></div>
+        <span class="code-line">buildorbit login</span>
+      </div>
+      <div class="code-step">
+        <div class="step-num">3</div>
+        <span class="code-line">buildorbit run "Build a SaaS waitlist page"</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Generate New Key</div>
+    </div>
+    <div class="generate-form">
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label" for="key-label">Label (optional)</label>
+          <input id="key-label" type="text" class="form-input" placeholder="e.g. my-laptop, CI" maxlength="80">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="key-expiry">Expires in</label>
+          <select id="key-expiry" class="form-select">
+            <option value="7">7 days</option>
+            <option value="30" selected>30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+          </select>
+        </div>
+        <button class="btn-generate" id="btn-generate" onclick="generateKey()">
+          ⚡ Generate
+        </button>
+      </div>
+
+      <!-- Revealed token (shown once) -->
+      <div class="token-reveal" id="token-reveal">
+        <div class="token-reveal-header">
+          <span class="token-reveal-icon">✅</span>
+          <span class="token-reveal-title">Key created — copy it now</span>
+        </div>
+        <p class="token-reveal-warn">This key won't be shown again. Store it somewhere safe (e.g. a password manager).</p>
+        <div class="token-value-row">
+          <div class="token-value mono" id="token-value"></div>
+          <button class="btn-copy" id="btn-copy" onclick="copyToken()">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Keys -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Active Keys</div>
+    </div>
+    <div class="token-list" id="token-list">
+      <div class="token-list-empty">
+        <div>🔑</div>
+        Loading keys…
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+  let currentToken = null;
+
+  // ── Load token list on page load ─────────────────────────────────────────
+
+  async function loadTokens() {
+    const list = document.getElementById('token-list');
+    try {
+      const res = await fetch('/auth/api-tokens', { credentials: 'include' });
+      if (!res.ok) {
+        if (res.status === 401) {
+          window.location.href = '/signup';
+          return;
+        }
+        throw new Error('Failed to load tokens');
+      }
+      const { tokens } = await res.json();
+      renderTokenList(tokens);
+    } catch (err) {
+      list.innerHTML = `<div class="token-list-empty" style="color:var(--error)">Failed to load keys. Refresh to retry.</div>`;
+    }
+  }
+
+  function renderTokenList(tokens) {
+    const list = document.getElementById('token-list');
+    if (!tokens || tokens.length === 0) {
+      list.innerHTML = `
+        <div class="token-list-empty">
+          <div style="font-size:2rem;margin-bottom:0.5rem">🔑</div>
+          No active keys yet. Generate one above to get started.
+        </div>`;
+      return;
+    }
+
+    list.innerHTML = tokens.map(tok => {
+      const isExpired = tok.expires_at && new Date(tok.expires_at) < new Date();
+      const created = formatDate(tok.created_at);
+      const expiry = tok.expires_at ? formatDate(tok.expires_at) : 'no expiry';
+      const label = tok.label || 'Unnamed key';
+      const hash = tok.token_hash ? tok.token_hash.slice(0, 8) + '…' : '••••••••';
+      const statusClass = isExpired ? 'expired' : 'active';
+      const statusLabel = isExpired ? 'Expired' : 'Active';
+
+      return `
+        <div class="token-item" id="token-item-${tok.id}">
+          <div class="token-item-icon">🔑</div>
+          <div class="token-item-info">
+            <div class="token-item-label">${escapeHtml(label)}</div>
+            <div class="token-item-meta">
+              <span class="token-item-hash mono">${hash}</span>
+              <span class="token-item-date">Created ${created}</span>
+              <span class="token-item-date">Expires ${expiry}</span>
+              <span class="token-status-badge ${statusClass}">${statusLabel}</span>
+            </div>
+          </div>
+          ${!isExpired ? `<button class="btn-revoke" onclick="revokeToken('${tok.id}')">Revoke</button>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+  // ── Generate ─────────────────────────────────────────────────────────────
+
+  async function generateKey() {
+    const btn = document.getElementById('btn-generate');
+    const labelInput = document.getElementById('key-label');
+    const expirySelect = document.getElementById('key-expiry');
+    const reveal = document.getElementById('token-reveal');
+    const tokenValue = document.getElementById('token-value');
+
+    btn.disabled = true;
+    btn.textContent = '…';
+
+    try {
+      const label = labelInput.value.trim() || null;
+      const expires_in = parseInt(expirySelect.value, 10);
+
+      const res = await fetch('/auth/api-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ label, expires_in }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 401) { window.location.href = '/signup'; return; }
+        if (res.status === 429) throw new Error('Token limit reached (max 10 active keys)');
+        throw new Error(body.message || 'Failed to create key');
+      }
+
+      const data = await res.json();
+      currentToken = data.token;
+      tokenValue.textContent = data.token;
+      reveal.classList.add('visible');
+      reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+      // Reset copy button
+      const copyBtn = document.getElementById('btn-copy');
+      copyBtn.textContent = 'Copy';
+      copyBtn.classList.remove('copied');
+
+      // Reload list
+      await loadTokens();
+      labelInput.value = '';
+
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '⚡ Generate';
+    }
+  }
+
+  // ── Copy ─────────────────────────────────────────────────────────────────
+
+  async function copyToken() {
+    if (!currentToken) return;
+    try {
+      await navigator.clipboard.writeText(currentToken);
+      const btn = document.getElementById('btn-copy');
+      btn.textContent = '✓ Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2500);
+    } catch {
+      showToast('Copy failed — select and copy the key manually', 'error');
+    }
+  }
+
+  // ── Revoke ────────────────────────────────────────────────────────────────
+
+  async function revokeToken(id) {
+    if (!confirm('Revoke this API key? Any CLI or script using it will stop working immediately.')) return;
+    try {
+      const res = await fetch(`/auth/api-token/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || 'Failed to revoke token');
+      }
+      showToast('Key revoked', 'success');
+      await loadTokens();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function formatDate(iso) {
+    if (!iso) return 'unknown';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = (type === 'error' ? '✗ ' : '✓ ') + message;
+    toast.className = `toast visible ${type}`;
+    setTimeout(() => toast.classList.remove('visible'), 4000);
+  }
+
+  // Load on page load
+  loadTokens();
+</script>
+
+</body>
+</html>

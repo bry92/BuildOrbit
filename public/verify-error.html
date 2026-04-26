@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verification Failed — BuildOrbit</title>
+  <link rel="stylesheet" href="/css/buildorbit.css?v=20260426e">
+</head>
+<body class="page-verify-error">
+
+<div class="wrap">
+  <a href="/" class="logo">
+    <div class="logo-dot"></div>
+    BuildOrbit
+  </a>
+
+  <div class="error-code" id="errorCode">ERR_INVALID_LINK</div>
+
+  <h1 class="error-heading" id="errorHeading">This link isn't working.</h1>
+  <p class="error-message" id="errorMessage">
+    The magic link you clicked is invalid or has already been used. Request a new one and try again.
+  </p>
+
+  <div class="err-block">
+    <div class="err-icon">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </div>
+    <div class="err-text">
+      <div class="err-label" id="errLabel">Status</div>
+      <div class="err-detail" id="errDetail">Invalid token</div>
+    </div>
+  </div>
+
+  <a href="/signup" class="retry-btn" id="retryBtn">
+    <span>→</span>
+    <span id="btnLabel">Request new link</span>
+  </a>
+</div>
+
+<p class="note">BuildOrbit — autonomous execution</p>
+
+<script>
+  // Parse error params from URL
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const email = params.get('email'); // pre-fill hint for expired/used cases
+
+  const errorConfig = {
+    expired: {
+      heading: 'This link has expired.',
+      message: 'Magic links are valid for 15 minutes. Request a new one and try again.',
+      code: 'ERR_LINK_EXPIRED',
+      label: 'Expired',
+      detail: 'Token has expired',
+      btn: 'Send a new one'
+    },
+    used: {
+      heading: 'This link has already been used.',
+      message: 'Each magic link can only be used once. Sign in again to get a fresh link.',
+      code: 'ERR_LINK_USED',
+      label: 'Already used',
+      detail: 'Token consumed',
+      btn: 'Sign in again'
+    },
+    invalid: {
+      heading: 'This link isn\'t working.',
+      message: 'The magic link you clicked is invalid or corrupted. Request a new one.',
+      code: 'ERR_INVALID_LINK',
+      label: 'Invalid',
+      detail: 'Token not found',
+      btn: 'Request new link'
+    },
+    missing: {
+      heading: 'Missing link.',
+      message: 'No token was provided. Request a new magic link from the sign-in page.',
+      code: 'ERR_MISSING_TOKEN',
+      label: 'Missing',
+      detail: 'No token',
+      btn: 'Go to sign in'
+    },
+    server: {
+      heading: 'Something went wrong.',
+      message: 'A server error occurred during verification. Please try again.',
+      code: 'ERR_SERVER',
+      label: 'Server error',
+      detail: 'Internal error',
+      btn: 'Try again'
+    }
+  };
+
+  const cfg = errorConfig[code] || errorConfig.invalid;
+
+  document.getElementById('errorCode').textContent = cfg.code;
+  document.getElementById('errorHeading').textContent = cfg.heading;
+  document.getElementById('errorMessage').textContent = cfg.message;
+  document.getElementById('errLabel').textContent = cfg.label;
+  document.getElementById('errDetail').textContent = cfg.detail;
+  document.getElementById('btnLabel').textContent = cfg.btn;
+
+  // Pre-fill email on the signup page for expired/used cases
+  if (email && (code === 'expired' || code === 'used')) {
+    document.getElementById('retryBtn').href = '/signup?email=' + encodeURIComponent(email);
+  }
+</script>
+</body>
+</html>

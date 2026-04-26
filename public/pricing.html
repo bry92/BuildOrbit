@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pricing — BuildOrbit</title>
+    <link rel="stylesheet" href="/css/buildorbit.css?v=20260426e">
+</head>
+<body class="page-pricing">
+
+    <div class="pricing-wrap">
+        <a href="/" class="pricing-logo">
+            <div class="logo-dot"></div>
+            <span>BuildOrbit</span>
+        </a>
+
+        <div class="badge">Simple pricing</div>
+        <h1>Ship every day,<br><span>automatically.</span></h1>
+        <p class="sub">One plan. Everything included. Daily autonomous cycles that build features while you're focused on the bigger picture.</p>
+
+        <div class="plan-card">
+            <div class="plan-price">$49<span>/month</span></div>
+            <p class="plan-desc">BuildOrbit Pro — everything you need to ship continuously.</p>
+
+            <ul class="plan-features">
+                <li><span class="check">✓</span> Daily autonomous build cycles</li>
+                <li><span class="check">✓</span> <strong>10 bonus task credits</strong> on signup</li>
+                <li><span class="check">✓</span> 5 renewal credits every month</li>
+                <li><span class="check">✓</span> Full pipeline: plan → build → verify → deploy</li>
+                <li><span class="check">✓</span> Live build dashboard with replay</li>
+                <li><span class="check">✓</span> Per-run cost tracking &amp; budget controls</li>
+            </ul>
+
+            <div class="trial-row">
+                <div class="dot"></div>
+                New accounts start with 10 free trial credits. No credit card required.
+            </div>
+
+            <a href="/dashboard" class="cta-btn" id="cta-btn">Get started →</a>
+            <p class="cta-note">Secured by Stripe · Cancel any time</p>
+        </div>
+
+        <a href="/dashboard" class="back-link">← Back to dashboard</a>
+    </div>
+
+    <script>
+        // If user is logged in, the CTA goes straight to checkout
+        (async () => {
+            try {
+                const r = await fetch('/api/billing/status');
+                if (!r.ok) return;
+                const d = await r.json();
+                if (!d.success) return;
+
+                const btn = document.getElementById('cta-btn');
+                if (d.subscription_status !== 'active') {
+                    btn.textContent = 'Subscribe for $49/month →';
+                    btn.onclick = async (e) => {
+                        e.preventDefault();
+                        btn.textContent = 'Redirecting...';
+                        try {
+                            const res = await fetch('/api/billing/create-checkout', { method: 'POST' });
+                            const data = await res.json();
+                            if (data.success && data.url) window.location.href = data.url;
+                        } catch (_) { btn.textContent = 'Subscribe for $49/month →'; }
+                    };
+                } else {
+                    btn.textContent = 'Go to dashboard →';
+                    btn.href = '/dashboard';
+                }
+            } catch (_) {}
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,2330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Build — BuildOrbit</title>
+    <link rel="stylesheet" href="/css/buildorbit.css?v=20260426h">
+</head>
+<body class="page-run">
+
+    <nav>
+        <a href="/" class="logo">
+            <div class="logo-dot"></div>
+            BuildOrbit
+        </a>
+        <div class="nav-links">
+            <a href="/trace" class="nav-link" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-dim)'">History</a>
+            <a href="/dashboard" class="nav-link" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">Dashboard</a>
+            <a href="/" class="nav-back">← Back</a>
+            <a href="/auth/logout" class="nav-link" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">Sign out</a>
+        </div>
+    </nav>
+
+    <main>
+        <!-- Input Section -->
+        <section id="input-section">
+            <h1>What do you want to build?</h1>
+            <p class="subtitle">Describe it. We'll handle the rest — six phases from idea to finished product.</p>
+
+            <div class="input-wrapper">
+                <textarea id="prompt" placeholder="Build a task management app with categories, due dates, and a clean dashboard..."></textarea>
+            </div>
+
+            <!-- Budget controls (optional) -->
+            <details id="budget-details" class="config-details">
+                <summary class="config-summary">
+                    <span>⚙ Set a spending limit (optional)</span>
+                    <span id="budget-summary-chip" class="config-chip">no limits set</span>
+                </summary>
+                <div class="config-body config-grid-2col">
+                    <div>
+                        <label class="config-label">Spending limit ($) — stops the build</label>
+                        <input id="budget-cap" type="number" min="0.001" max="10" step="0.001" placeholder="e.g. 0.05"
+                            class="config-input"
+                            oninput="updateBudgetChip()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+                    </div>
+                    <div>
+                        <label class="config-label">Warning amount ($) — alerts only</label>
+                        <input id="budget-warning" type="number" min="0.001" max="10" step="0.001" placeholder="e.g. 0.02"
+                            class="config-input"
+                            oninput="updateBudgetChip()" onfocus="this.style.borderColor='var(--warning)'" onblur="this.style.borderColor='var(--border)'">
+                    </div>
+                    <p class="config-hint">GPT-4o-mini pricing: $0.15/1M input tokens · $0.60/1M output tokens · Typical run: ~$0.003–$0.015</p>
+                </div>
+            </details>
+
+            <!-- Product Context — tells agents what the product actually is -->
+            <details id="ctx-details" class="config-details">
+                <summary class="config-summary">
+                    <span>📦 Product context <span class="config-hint-inline">(prevents hallucinated content)</span></span>
+                    <span id="ctx-summary-chip" class="config-chip">not set</span>
+                </summary>
+                <div class="config-body">
+                    <p class="config-description">Without this, the builder guesses what your product does from the name alone — often wrong. Provide context so the generated copy, features, and descriptions match reality.</p>
+                    <div class="config-grid-2col-tight">
+                        <div>
+                            <label class="config-label">Company name</label>
+                            <input id="ctx-company" type="text" placeholder="e.g. BuildOrbit"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                        <div>
+                            <label class="config-label">Product name / tagline</label>
+                            <input id="ctx-product" type="text" placeholder="e.g. Autonomous execution engine"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                        <div class="config-full-width">
+                            <label class="config-label">What it actually does</label>
+                            <input id="ctx-description" type="text" placeholder="e.g. 6-phase pipeline: INTENT GATE → PLAN → SCAFFOLD → CODE → SAVE → VERIFY"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                        <div>
+                            <label class="config-label">Core features</label>
+                            <input id="ctx-features" type="text" placeholder="e.g. Real-time streaming, artifact storage, deterministic pipeline"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                        <div>
+                            <label class="config-label">Target audience</label>
+                            <input id="ctx-audience" type="text" placeholder="e.g. Founders, dev teams, regulated industries"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                        <div>
+                            <label class="config-label">Key differentiator</label>
+                            <input id="ctx-differentiator" type="text" placeholder="e.g. Visible, traceable execution — not a black box"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                        <div>
+                            <label class="config-label">Brand voice</label>
+                            <input id="ctx-voice" type="text" placeholder="e.g. Direct, technical, trustworthy"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                        <div>
+                            <label class="config-label">Pricing</label>
+                            <input id="ctx-pricing" type="text" placeholder="e.g. Free beta, $29/mo, usage-based"
+                                class="adv-config-input" oninput="updateCtxChip()">
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <!-- Advanced config (model selection, constraints) -->
+            <details id="adv-details" class="config-details">
+                <summary class="config-summary">
+                    <span>⚙ Advanced settings (optional)</span>
+                    <span id="adv-summary-chip" class="config-chip">defaults</span>
+                </summary>
+                <div class="config-body">
+                    <div class="adv-config-grid">
+                        <div class="adv-config-section-label">Speed vs. Quality — per step</div>
+                        <div>
+                            <label class="config-label">Plan step</label>
+                            <select id="model-planner" class="adv-config-select" onchange="updateAdvChip()">
+                                <option value="">Default (gpt-4o-mini)</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                <option value="gpt-4.1">gpt-4.1</option>
+                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="config-label">Code step</label>
+                            <select id="model-builder" class="adv-config-select" onchange="updateAdvChip()">
+                                <option value="">Default (gpt-4o-mini)</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                <option value="gpt-4.1">gpt-4.1</option>
+                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="config-label">Save step</label>
+                            <select id="model-ops" class="adv-config-select" onchange="updateAdvChip()">
+                                <option value="">Default (gpt-4o-mini)</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                <option value="gpt-4.1">gpt-4.1</option>
+                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="config-label">Verify step</label>
+                            <select id="model-qa" class="adv-config-select" onchange="updateAdvChip()">
+                                <option value="">Default (gpt-4o-mini)</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                <option value="gpt-4.1">gpt-4.1</option>
+                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                            </select>
+                        </div>
+                        <div class="adv-config-section-label">Preferences</div>
+                        <div>
+                            <label class="config-label">Max build time (min)</label>
+                            <input id="constraint-time" type="number" min="1" max="60" step="1" placeholder="no limit"
+                                class="adv-config-input" oninput="updateAdvChip()">
+                        </div>
+                        <div>
+                            <label class="config-label">Quality level (1–10)</label>
+                            <input id="constraint-quality" type="number" min="1" max="10" step="1" placeholder="no threshold"
+                                class="adv-config-input" oninput="updateAdvChip()">
+                        </div>
+                        <div class="adv-config-section-label config-full-width">Deploy</div>
+                        <div class="config-full-width toggle-row">
+                            <label class="toggle-label">
+                                <div class="toggle-container">
+                                    <input type="checkbox" id="auto-deploy" onchange="updateAdvChip()"
+                                        class="toggle-checkbox">
+                                    <div id="auto-deploy-track" class="toggle-track" onclick="document.getElementById('auto-deploy').click()"></div>
+                                    <div id="auto-deploy-thumb" class="toggle-thumb"></div>
+                                </div>
+                                <span class="toggle-text">Publish automatically when ready</span>
+                            </label>
+                            <span class="toggle-hint">auto-deploy</span>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <div class="input-footer">
+                <span class="input-hint mono">Intent Gate → Plan → Scaffold → Code → Save → Verify</span>
+                <button id="run-btn">
+                    Start Build
+                    <span class="arrow">→</span>
+                </button>
+            </div>
+
+            <!-- Mini pipeline preview — shows what a completed run looks like -->
+            <div class="pipeline-preview-block">
+                <div class="pipeline-preview-label">What a finished build looks like</div>
+                <div class="pipeline-preview-phases">
+                    <div class="pp-phase">
+                        <div class="pp-dot">✓</div>
+                        <span class="pp-name">Intent Gate</span>
+                    </div>
+                    <div class="pp-connector"></div>
+                    <div class="pp-phase">
+                        <div class="pp-dot">✓</div>
+                        <span class="pp-name">Plan</span>
+                    </div>
+                    <div class="pp-connector"></div>
+                    <div class="pp-phase">
+                        <div class="pp-dot">✓</div>
+                        <span class="pp-name">Scaffold</span>
+                    </div>
+                    <div class="pp-connector"></div>
+                    <div class="pp-phase">
+                        <div class="pp-dot">✓</div>
+                        <span class="pp-name">Code</span>
+                    </div>
+                    <div class="pp-connector"></div>
+                    <div class="pp-phase">
+                        <div class="pp-dot">✓</div>
+                        <span class="pp-name">Save</span>
+                    </div>
+                    <div class="pp-connector"></div>
+                    <div class="pp-phase">
+                        <div class="pp-dot">✓</div>
+                        <span class="pp-name">Verify</span>
+                    </div>
+                </div>
+                <p class="pipeline-preview-caption">Deterministic 6-phase pipeline — visible, traceable, repeatable</p>
+            </div>
+        </section>
+
+        <!-- Pipeline Execution Section -->
+        <section id="pipeline-section">
+            <!-- Show the prompt being executed -->
+            <div class="run-prompt">
+                <span class="label">Task</span>
+                <span class="text" id="prompt-display"></span>
+            </div>
+
+            <!-- Intent class badge — shown once Intent Gate classifies -->
+            <div id="intent-badge-bar" class="intent-badge-bar" style="display:none">
+                <span id="intent-class-badge" class="intent-class-badge"></span>
+                <span class="intent-label">Intent classified</span>
+            </div>
+
+            <!-- Intervention Controls (visible while running/paused) -->
+            <div class="intervention-bar" id="intervention-bar" style="display:none">
+                <button class="ctrl-btn ctrl-btn-pause" id="btn-pause" onclick="doPause()">⏸ Pause</button>
+                <button class="ctrl-btn ctrl-btn-resume" id="btn-resume" onclick="doResume()" style="display:none">▶ Resume</button>
+                <button class="ctrl-btn ctrl-btn-inject" id="btn-inject" onclick="toggleInjectPanel()">↩ Add note</button>
+                <button class="ctrl-btn ctrl-btn-override" id="btn-override" onclick="toggleOverridePanel()">⚡ Special instructions</button>
+                <span id="intervention-status" class="intervention-status"></span>
+            </div>
+
+            <!-- Connection-lost banner (SSE reconnection) -->
+            <div class="connection-lost-banner" id="connection-lost-banner">
+                <div class="conn-pulse"></div>
+                <span class="conn-text" id="conn-lost-text">Connection lost — reconnecting...</span>
+                <button class="conn-btn" onclick="manualReconnect()">Reconnect</button>
+            </div>
+
+            <!-- Paused banner -->
+            <div class="paused-banner" id="paused-banner">
+                <div class="paused-pulse"></div>
+                <span>Build paused — add a note or continue</span>
+            </div>
+
+            <!-- Instruction injection panel -->
+            <div class="inject-panel" id="inject-panel">
+                <div class="inject-panel-label">↩ Add a note for the next step</div>
+                <div class="inject-row">
+                    <input id="inject-input" class="inject-input" type="text" placeholder='e.g. "focus on security" or "make error messages friendlier"'>
+                    <button class="inject-send-btn" id="inject-send-btn" onclick="sendInjection()">Send</button>
+                </div>
+                <div class="inject-log" id="inject-log"></div>
+            </div>
+
+            <!-- Agent override panel -->
+            <div class="override-panel" id="override-panel">
+                <div class="override-panel-label">⚡ Give special instructions for one step</div>
+                <div class="override-agents">
+                    <button class="override-agent-btn" data-agent="planner" onclick="selectOverrideAgent(this)">Plan</button>
+                    <button class="override-agent-btn" data-agent="builder" onclick="selectOverrideAgent(this)">Code</button>
+                    <button class="override-agent-btn" data-agent="ops" onclick="selectOverrideAgent(this)">Save</button>
+                    <button class="override-agent-btn" data-agent="qa" onclick="selectOverrideAgent(this)">Verify</button>
+                </div>
+                <div class="override-prompt-row">
+                    <textarea id="override-prompt-input" class="override-prompt-input" placeholder="What should this step do differently?"></textarea>
+                    <button class="override-send-btn" id="override-send-btn" onclick="sendOverride()">Apply</button>
+                </div>
+            </div>
+
+            <!-- Phase Progress Stepper — canonical 6-phase pipeline -->
+            <div class="phase-tracker">
+                <div class="phase-indicator" data-phase="_intent_gate" data-status="pending">
+                    <div class="phase-dot"><span class="phase-num">1</span></div>
+                    <span class="phase-name">Intent Gate</span>
+                    <span class="phase-time" id="ptime-_intent_gate"></span>
+                </div>
+                <div class="phase-connector"></div>
+
+                <div class="phase-indicator" data-phase="plan" data-status="pending">
+                    <div class="phase-dot"><span class="phase-num">2</span></div>
+                    <span class="phase-name">Plan</span>
+                    <span class="phase-time" id="ptime-plan"></span>
+                </div>
+                <div class="phase-connector"></div>
+
+                <div class="phase-indicator" data-phase="scaffold" data-status="pending">
+                    <div class="phase-dot"><span class="phase-num">3</span></div>
+                    <span class="phase-name">Scaffold</span>
+                    <span class="phase-time" id="ptime-scaffold"></span>
+                </div>
+                <div class="phase-connector"></div>
+
+                <div class="phase-indicator" data-phase="code" data-status="pending">
+                    <div class="phase-dot"><span class="phase-num">4</span></div>
+                    <span class="phase-name">Code</span>
+                    <span class="phase-time" id="ptime-code"></span>
+                </div>
+                <div class="phase-connector"></div>
+
+                <div class="phase-indicator" data-phase="save" data-status="pending">
+                    <div class="phase-dot"><span class="phase-num">5</span></div>
+                    <span class="phase-name">Save</span>
+                    <span class="phase-time" id="ptime-save"></span>
+                </div>
+                <div class="phase-connector"></div>
+
+                <div class="phase-indicator" data-phase="verify" data-status="pending">
+                    <div class="phase-dot"><span class="phase-num">6</span></div>
+                    <span class="phase-name">Verify</span>
+                    <span class="phase-time" id="ptime-verify"></span>
+                </div>
+                <div class="phase-connector" id="connector-deploy"></div>
+
+                <div class="phase-indicator" data-phase="deploy" data-status="pending">
+                    <div class="phase-dot"><span class="phase-num">↑</span></div>
+                    <span class="phase-name">Deploy</span>
+                    <span class="phase-time" id="ptime-deploy"></span>
+                </div>
+            </div>
+
+            <!-- View Full Trace button — primary differentiator -->
+            <div class="trace-btn-bar">
+                <a id="btn-view-trace-stepper" href="#" class="view-trace-btn dimmed" title="View causal execution graph (DAG)">
+                    🔍 View Full Trace
+                </a>
+            </div>
+
+            <!-- Live cost indicator (shows when budget configured or costs accumulate) -->
+            <div id="live-cost-bar" class="live-cost-bar" style="display:none">
+                <div class="live-cost-header">
+                    <span class="live-cost-label">Build cost</span>
+                    <span id="live-cost-value" class="live-cost-value">$0.0000</span>
+                </div>
+                <div id="live-budget-track" class="live-budget-track" style="display:none">
+                    <div id="live-budget-fill" class="live-budget-fill"></div>
+                </div>
+                <div id="live-budget-hint" class="live-budget-hint" style="display:none"></div>
+            </div>
+
+            <!-- Preview Split Layout: terminal (left) + live preview (right) -->
+            <div class="preview-split" id="preview-split">
+
+                <!-- Left: Build output + banners -->
+                <div class="terminal-wrapper" id="terminal-wrapper">
+
+                    <!-- Terminal Output -->
+                    <div class="terminal">
+                        <div class="terminal-header">
+                            <div class="terminal-tabs">
+                                <button class="terminal-tab active" data-tab="_intent_gate">Intent Gate</button>
+                                <button class="terminal-tab" data-tab="plan">Plan</button>
+                                <button class="terminal-tab" data-tab="scaffold">Scaffold</button>
+                                <button class="terminal-tab" data-tab="code">Code</button>
+                                <button class="terminal-tab" data-tab="save">Save</button>
+                                <button class="terminal-tab" data-tab="verify">Verify</button>
+                            </div>
+                            <div class="terminal-status" id="terminal-status">
+                                <div class="dot"></div>
+                                <span>waiting</span>
+                            </div>
+                        </div>
+                        <div class="terminal-body" id="terminal-body">
+                            <div class="terminal-content" id="terminal-content"></div>
+                            <span class="terminal-cursor" id="cursor"></span>
+                        </div>
+                    </div>
+
+                    <!-- Completed Banner -->
+                    <div class="completed-banner" id="completed-banner">
+                        <h3>Build finished</h3>
+                        <p>Reviewing results...</p>
+                        <!-- Onboarding credit nudge — shown only on first run -->
+                        <div id="onboarding-credit-nudge" class="onboarding-credit-nudge" style="display:none">
+                            That was <strong class="accent-strong">1 of your 10 trial credits</strong>. Try your own idea →
+                        </div>
+                        <div class="completed-actions">
+                            <button class="new-run-btn" id="btn-build-another" onclick="handleBuildAnother()">Build another →</button>
+                            <a id="btn-view-trace" href="#" class="btn-view-trace" style="display:none">🔍 View Trace</a>
+                            <a id="btn-edit-code" href="#" class="btn-edit-code" style="display:none" title="Open code editor">✏ Edit Code</a>
+                            <button id="btn-deploy-now" onclick="triggerDeploy()" class="btn-deploy-now" style="display:none">🚀 Put it live</button>
+                            <!-- Export Run Report — only shown after terminal status -->
+                            <div id="btn-export-wrapper" class="export-dropdown-wrapper" style="display:none">
+                                <button class="btn-export-report" id="btn-export-toggle" onclick="toggleExportDropdown(event)" title="Download compliance artifact">
+                                    📋 Export Report <span class="export-chevron">▾</span>
+                                </button>
+                                <div class="export-dropdown" id="export-dropdown" style="display:none">
+                                    <a href="#" class="export-option" onclick="triggerExport('json'); return false;">
+                                        <span class="export-option-icon">{ }</span>
+                                        <span class="export-option-label">
+                                            <strong>JSON</strong>
+                                            <span class="export-option-desc">Machine-readable compliance artifact</span>
+                                        </span>
+                                    </a>
+                                    <a href="#" class="export-option" onclick="triggerExport('pdf'); return false;">
+                                        <span class="export-option-icon">📄</span>
+                                        <span class="export-option-label">
+                                            <strong>PDF</strong>
+                                            <span class="export-option-desc">Human-readable audit report</span>
+                                        </span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Deploy Panel — "Your live site" -->
+                    <div id="deploy-panel" class="deploy-panel" style="display:none">
+                        <div class="deploy-header">
+                            <div id="deploy-status-dot" class="deploy-status-dot"></div>
+                            <span class="deploy-title">Your live site</span>
+                            <span id="deploy-status-label" class="deploy-status-label">—</span>
+                        </div>
+
+                        <!-- Progress steps -->
+                        <div id="deploy-progress-steps" class="deploy-progress-steps">
+                            <div id="deploy-step-packaging" class="deploy-step" data-status="pending">📦 Packaging your work</div>
+                            <div id="deploy-step-uploading" class="deploy-step" data-status="pending">⬆ Uploading</div>
+                            <div id="deploy-step-live" class="deploy-step" data-status="pending">🌐 Live</div>
+                        </div>
+
+                        <!-- Live URL (shown after deploy) -->
+                        <div id="deploy-url-block" class="deploy-url-block" style="display:none">
+                            <div class="deploy-url-label">Live URL</div>
+                            <a id="deploy-live-url" href="#" target="_blank" rel="noopener" class="deploy-live-url">
+                            </a>
+                        </div>
+
+                        <!-- Version history -->
+                        <div id="deploy-history-block" style="display:none">
+                            <div class="deploy-history-title">Deploy History</div>
+                            <div id="deploy-history-list" class="deploy-history-list"></div>
+                        </div>
+                    </div>
+
+                    <!-- Error Banner -->
+                    <div class="error-banner" id="error-banner">
+                        <p id="error-message"></p>
+                    </div>
+
+                </div><!-- /.terminal-wrapper -->
+
+                <!-- Drag-to-resize handle -->
+                <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
+
+                <!-- Right: Live Preview iframe panel -->
+                <div class="preview-panel" id="preview-panel">
+                    <div class="preview-toolbar">
+                        <span class="preview-toolbar-title">🌐 Live Preview</span>
+                        <div class="preview-toolbar-actions">
+                            <button class="preview-btn" onclick="refreshPreview()" title="Reload preview">⟳ Refresh</button>
+                            <button class="preview-btn" onclick="openInNewTab()" title="Open full preview in new tab">↗ Open</button>
+                        </div>
+                    </div>
+                    <div class="preview-iframe-container" id="preview-iframe-container">
+                        <div class="preview-empty" id="preview-empty">
+                            <div class="preview-empty-icon">🚀</div>
+                            <div class="preview-empty-text">Your app will appear here once it's live</div>
+                        </div>
+                        <iframe id="preview-iframe"
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                            allow="fullscreen"
+                            title="Live app preview">
+                        </iframe>
+                    </div>
+                </div><!-- /.preview-panel -->
+
+            </div><!-- /.preview-split -->
+        </section>
+    </main>
+
+    <script>
+    (function() {
+        // ── State ─────────────────────────────────────
+        const PHASES = ['_intent_gate', 'plan', 'scaffold', 'code', 'save', 'verify', 'deploy'];
+        let phaseContent = {};
+        let activeTab = 'plan';
+        let currentPhase = null;
+        let isRunning = false;
+        let isPaused = false;
+        let currentRunId = null;
+        // Stored verify report data — set by verify_report event,
+        // used as primary source for the completion banner.
+        let _verifyReportData = null;
+        // Phase timing — track start/elapsed times per phase
+        const phaseStartTimes = {};
+        const phaseElapsed = {};
+        let selectedOverrideAgent = null;
+        let previewUrl = null;
+        // Intent Gate classification for intent-aware UI rendering
+        let _currentIntentClass = null;
+
+        // ── Onboarding detection ──────────────────────
+        const _pageParams = new URLSearchParams(window.location.search);
+        const isOnboardingRun = _pageParams.get('onboarding') === 'true';
+
+        // ── Elements ──────────────────────────────────
+        const promptEl = document.getElementById('prompt');
+        const runBtn = document.getElementById('run-btn');
+        const inputSection = document.getElementById('input-section');
+        const pipelineSection = document.getElementById('pipeline-section');
+        const promptDisplay = document.getElementById('prompt-display');
+        const terminalContent = document.getElementById('terminal-content');
+        const terminalBody = document.getElementById('terminal-body');
+        const terminalStatus = document.getElementById('terminal-status');
+        const cursor = document.getElementById('cursor');
+        const completedBanner = document.getElementById('completed-banner');
+        const errorBanner = document.getElementById('error-banner');
+        const errorMessage = document.getElementById('error-message');
+
+        // ── Init ──────────────────────────────────────
+        PHASES.forEach(p => { phaseContent[p] = ''; });
+
+        // ── Budget helpers ────────────────────────────
+        function fmtUsd(n) {
+            if (!n && n !== 0) return '—';
+            if (n < 0.001) return `$${(n * 1000).toFixed(3)}m`;
+            if (n < 1) return `$${n.toFixed(4)}`;
+            return `$${n.toFixed(3)}`;
+        }
+
+        function updateBudgetChip() {
+            const chip = document.getElementById('budget-summary-chip');
+            const cap = parseFloat(document.getElementById('budget-cap').value);
+            const warn = parseFloat(document.getElementById('budget-warning').value);
+            const parts = [];
+            if (isFinite(cap) && cap > 0)   parts.push(`cap ${fmtUsd(cap)}`);
+            if (isFinite(warn) && warn > 0)  parts.push(`warn ${fmtUsd(warn)}`);
+            chip.textContent = parts.length ? parts.join(' · ') : 'no limits set';
+        }
+        window.updateBudgetChip = updateBudgetChip;
+
+        function updateAdvChip() {
+            const chip = document.getElementById('adv-summary-chip');
+            const models = ['planner','builder','ops','qa']
+                .map(id => document.getElementById(`model-${id}`)?.value)
+                .filter(Boolean);
+            const time = parseInt(document.getElementById('constraint-time')?.value);
+            const quality = parseInt(document.getElementById('constraint-quality')?.value);
+            const autoDeploy = document.getElementById('auto-deploy')?.checked;
+            const parts = [];
+            if (models.length) parts.push(models.length + ' model overrides');
+            if (isFinite(time) && time > 0) parts.push(`${time}m limit`);
+            if (isFinite(quality) && quality > 0) parts.push(`q≥${quality}`);
+            if (autoDeploy) parts.push('auto-deploy on');
+            chip.textContent = parts.length ? parts.join(' · ') : 'defaults';
+
+            // Sync toggle visual state
+            const track = document.getElementById('auto-deploy-track');
+            const thumb = document.getElementById('auto-deploy-thumb');
+            if (track && thumb) {
+                track.style.background = autoDeploy ? 'rgba(20,184,166,0.55)' : 'var(--border)';
+                thumb.style.transform = autoDeploy ? 'translateX(18px)' : 'translateX(0)';
+            }
+        }
+        window.updateAdvChip = updateAdvChip;
+
+        function updateCtxChip() {
+            const chip = document.getElementById('ctx-summary-chip');
+            if (!chip) return;
+            const company = document.getElementById('ctx-company')?.value?.trim();
+            const product = document.getElementById('ctx-product')?.value?.trim();
+            if (company || product) {
+                chip.textContent = [company, product].filter(Boolean).join(' — ');
+                chip.style.color = 'var(--accent)';
+            } else {
+                chip.textContent = 'not set';
+                chip.style.color = '';
+            }
+        }
+        window.updateCtxChip = updateCtxChip;
+
+        runBtn.addEventListener('click', startPipeline);
+        promptEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                startPipeline();
+            }
+        });
+
+        // Tab switching
+        document.querySelectorAll('.terminal-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                switchTab(tab.dataset.tab);
+            });
+        });
+
+        // Phase indicator click to switch tab
+        document.querySelectorAll('.phase-indicator').forEach(ind => {
+            ind.addEventListener('click', () => {
+                switchTab(ind.dataset.phase);
+            });
+        });
+
+        // ── Start Pipeline ────────────────────────────
+        async function startPipeline() {
+            const prompt = promptEl.value.trim();
+            if (!prompt || isRunning) return;
+
+            isRunning = true;
+            runBtn.disabled = true;
+
+            // Reset state
+            PHASES.forEach(p => { phaseContent[p] = ''; });
+            _verifyReportData = null;
+            completedBanner.classList.remove('show', 'success', 'warning', 'error');
+            errorBanner.classList.remove('show');
+            resetPhaseIndicators();
+
+            // Show pipeline section
+            promptDisplay.textContent = prompt;
+            pipelineSection.style.display = 'block';
+            inputSection.style.display = 'none';
+
+            // Scroll to pipeline
+            pipelineSection.scrollIntoView({ behavior: 'smooth' });
+
+            // Update status
+            setTerminalStatus('running', 'running');
+
+            // Initialize live cost bar
+            const _capInit = parseFloat(document.getElementById('budget-cap').value);
+            const _warnInit = parseFloat(document.getElementById('budget-warning').value);
+            const hasBudget = (isFinite(_capInit) && _capInit > 0) || (isFinite(_warnInit) && _warnInit > 0);
+            const liveCostBar = document.getElementById('live-cost-bar');
+            liveCostBar.style.display = hasBudget ? 'block' : 'none';
+            document.getElementById('live-cost-value').textContent = '$0.0000';
+            document.getElementById('live-cost-value').style.color = 'var(--accent)';
+            document.getElementById('live-budget-track').style.display = 'none';
+            document.getElementById('live-budget-fill').style.width = '0%';
+            document.getElementById('live-budget-hint').style.display = 'none';
+
+            // Show intervention bar
+            document.getElementById('intervention-bar').style.display = 'flex';
+            document.getElementById('btn-pause').style.display = '';
+            document.getElementById('btn-resume').style.display = 'none';
+            document.getElementById('paused-banner').classList.remove('show');
+            document.getElementById('inject-panel').classList.remove('show');
+            document.getElementById('override-panel').classList.remove('show');
+            isPaused = false;
+
+            try {
+                // Create the pipeline run
+                // Read budget config (optional)
+                const budgetCapVal = parseFloat(document.getElementById('budget-cap').value);
+                const budgetWarnVal = parseFloat(document.getElementById('budget-warning').value);
+
+                // Read advanced run config
+                const modelConfig = {};
+                ['planner','builder','ops','qa'].forEach(agent => {
+                    const val = document.getElementById(`model-${agent}`)?.value;
+                    if (val) modelConfig[agent] = val;
+                });
+                const timeLimit = parseInt(document.getElementById('constraint-time')?.value);
+                const qualityThreshold = parseInt(document.getElementById('constraint-quality')?.value);
+                const constraints = {};
+                if (isFinite(timeLimit) && timeLimit > 0) constraints.timeLimitMinutes = timeLimit;
+                if (isFinite(qualityThreshold) && qualityThreshold > 0) constraints.qualityThreshold = qualityThreshold;
+
+                const autoDeploy = document.getElementById('auto-deploy')?.checked || false;
+
+                // Read product context fields (optional — prevents hallucinated content)
+                const ctxCompany      = document.getElementById('ctx-company')?.value?.trim();
+                const ctxProduct      = document.getElementById('ctx-product')?.value?.trim();
+                const ctxDescription  = document.getElementById('ctx-description')?.value?.trim();
+                const ctxFeatures     = document.getElementById('ctx-features')?.value?.trim();
+                const ctxAudience     = document.getElementById('ctx-audience')?.value?.trim();
+                const ctxDifferentiator = document.getElementById('ctx-differentiator')?.value?.trim();
+                const ctxVoice        = document.getElementById('ctx-voice')?.value?.trim();
+                const ctxPricing      = document.getElementById('ctx-pricing')?.value?.trim();
+
+                // Only include product context if at least one field is filled
+                const productContext = (ctxCompany || ctxProduct || ctxDescription)
+                    ? {
+                        ...(ctxCompany       ? { company: ctxCompany }               : {}),
+                        ...(ctxProduct       ? { product: ctxProduct }               : {}),
+                        ...(ctxDescription   ? { description: ctxDescription }       : {}),
+                        ...(ctxFeatures      ? { coreFeatures: ctxFeatures }         : {}),
+                        ...(ctxAudience      ? { targetAudience: ctxAudience }       : {}),
+                        ...(ctxDifferentiator ? { keyDifferentiator: ctxDifferentiator } : {}),
+                        ...(ctxVoice         ? { brandVoice: ctxVoice }              : {}),
+                        ...(ctxPricing       ? { pricing: ctxPricing }               : {}),
+                    }
+                    : null;
+
+                const body = {
+                    prompt,
+                    budgetCap:     isFinite(budgetCapVal)  && budgetCapVal > 0  ? budgetCapVal  : null,
+                    budgetWarning: isFinite(budgetWarnVal) && budgetWarnVal > 0 ? budgetWarnVal : null,
+                    runConfig: {
+                        ...(Object.keys(modelConfig).length ? { modelConfig } : {}),
+                        ...(Object.keys(constraints).length ? { constraints } : {}),
+                        ...(autoDeploy ? { autoDeploy: true } : {}),
+                    },
+                    ...(productContext ? { productContext } : {}),
+                };
+
+                const res = await fetch('/api/pipeline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await res.json();
+                if (!data.success) throw new Error(data.message || 'Failed to start the build');
+
+                currentRunId = data.id;
+                window._copilotRunId = data.id; // expose for copilot panel
+                // Show the copilot FAB now that we have a live run
+                var copilotFab = document.getElementById('copilot-fab');
+                if (copilotFab) copilotFab.style.display = '';
+                // Enable the stepper View Full Trace button (partial trace viewable in-progress)
+                var traceBtnStepper = document.getElementById('btn-view-trace-stepper');
+                if (traceBtnStepper) {
+                    traceBtnStepper.href = `/dag?run=${data.id}`;
+                    traceBtnStepper.classList.remove('dimmed');
+                    traceBtnStepper.title = 'View causal execution graph (DAG)';
+                }
+
+                // Connect to SSE stream
+                connectStream(data.id);
+            } catch (err) {
+                showError(err.message);
+                isRunning = false;
+                runBtn.disabled = false;
+            }
+        }
+
+        // ── SSE Stream with Reconnection ────────────
+        let _liveEventSource = null;
+        let _reconnectAttempts = 0;
+        let _reconnectTimer = null;
+        let _streamRunId = null;
+        let _buildTerminal = false; // true when build reached a terminal state (complete/failed)
+
+        function connectStream(runId) {
+            _streamRunId = runId;
+            _reconnectAttempts = 0;
+            _buildTerminal = false;
+            _doConnect(runId);
+        }
+
+        function _doConnect(runId) {
+            // Close any existing connection
+            if (_liveEventSource) {
+                try { _liveEventSource.close(); } catch (_) {}
+                _liveEventSource = null;
+            }
+
+            const isReconnect = _reconnectAttempts > 0;
+            if (isReconnect) {
+                // Clear all phase content — server will replay everything
+                PHASES.forEach(p => { phaseContent[p] = ''; });
+                _verifyReportData = null;
+                resetPhaseIndicators();
+                // Restore running state since we're reconnecting
+                isRunning = true;
+                cursor.style.display = '';
+                errorBanner.classList.remove('show');
+                completedBanner.classList.remove('show', 'success', 'warning', 'error');
+            }
+
+            const eventSource = new EventSource(`/api/pipeline/${runId}/stream`);
+            _liveEventSource = eventSource;
+
+            eventSource.addEventListener('connected', (e) => {
+                // Connection (re)established — hide the lost banner
+                _reconnectAttempts = 0;
+                _hideConnLostBanner();
+                if (isReconnect) {
+                    setTerminalStatus('running', 'reconnected');
+                }
+            });
+
+            eventSource.addEventListener('phase', (e) => {
+                const data = JSON.parse(e.data);
+                handlePhaseUpdate(data.phase, data.status);
+            });
+
+            eventSource.addEventListener('output', (e) => {
+                const data = JSON.parse(e.data);
+                appendOutput(data.phase, data.content);
+            });
+
+            // Live cost tracking events
+            eventSource.addEventListener('cost_update', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    if (d.totalCostUsd != null) updateLiveCost(d.totalCostUsd, null, null);
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('budget_warning', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    updateLiveCost(d.totalCost, d.budgetWarning, 'warning');
+                    showNotice(`⚠ Spending warning: ${fmtUsd(d.totalCost)} nearing your ${fmtUsd(d.budgetWarning)} limit`, 'warning');
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('budget_exceeded', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    updateLiveCost(d.totalCost, d.budgetCap, 'exceeded');
+                    showNotice(`Spending limit reached: ${fmtUsd(d.totalCost)} — build stopped`, 'error');
+                } catch (_) {}
+            });
+
+            // Pause/Resume events
+            eventSource.addEventListener('pipeline_paused', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    isPaused = true;
+                    document.getElementById('btn-pause').style.display = 'none';
+                    document.getElementById('btn-resume').style.display = '';
+                    document.getElementById('paused-banner').classList.add('show');
+                    setTerminalStatus('', 'paused ⏸');
+                    setInterventionStatus(`paused after ${d.after_stage || 'stage'}`);
+                    appendOutput(currentPhase || 'plan', `\n\n[PAUSED] Build paused — add a note or continue`);
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('pipeline_resumed', (e) => {
+                try {
+                    isPaused = false;
+                    document.getElementById('btn-pause').style.display = '';
+                    document.getElementById('btn-resume').style.display = 'none';
+                    document.getElementById('paused-banner').classList.remove('show');
+                    setTerminalStatus('running', 'running');
+                    setInterventionStatus('');
+                    appendOutput(currentPhase || 'plan', `\n\n[RESUMED] Build resuming...`);
+                } catch (_) {}
+            });
+
+            // Injection/Override acknowledgements
+            eventSource.addEventListener('instruction_injected', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    const log = document.getElementById('inject-log');
+                    if (log) {
+                        log.innerHTML += `<div>↩ Note added: "${d.message}"</div>`;
+                    }
+                    setInterventionStatus('✓ note queued');
+                    setTimeout(() => setInterventionStatus(''), 3000);
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('agent_overridden', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    setInterventionStatus(`✓ special instructions set`);
+                    setTimeout(() => setInterventionStatus(''), 3000);
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('complete', (e) => {
+                _buildTerminal = true;
+                setTerminalStatus('completed', 'completed');
+                cursor.style.display = 'none';
+                document.getElementById('intervention-bar').style.display = 'none';
+                document.getElementById('paused-banner').classList.remove('show');
+                _hideConnLostBanner();
+                isRunning = false;
+
+                // Update banner based on verification results.
+                let rawComplete = {};
+                try { rawComplete = JSON.parse(e.data); } catch (_) {}
+
+                var bannerData;
+                if (_verifyReportData && typeof _verifyReportData.totalChecks === 'number' && _verifyReportData.totalChecks > 0) {
+                    bannerData = _verifyReportData;
+                } else if (typeof rawComplete.totalChecks === 'number' && rawComplete.totalChecks > 0) {
+                    bannerData = rawComplete;
+                } else {
+                    var inferred = inferVerifyResultsFromOutput();
+                    bannerData = inferred || rawComplete;
+                }
+                updateCompletionBanner(bannerData);
+                completedBanner.classList.add('show');
+                if (isOnboardingRun) {
+                    const nudge = document.getElementById('onboarding-credit-nudge');
+                    if (nudge) nudge.style.display = 'block';
+                }
+                const traceBtn = document.getElementById('btn-view-trace');
+                if (traceBtn && runId) {
+                    traceBtn.href = `/dag?run=${runId}`;
+                    traceBtn.style.display = 'inline-block';
+                }
+                const editCodeBtn = document.getElementById('btn-edit-code');
+                if (editCodeBtn && runId) {
+                    editCodeBtn.href = `/run/${runId}/edit`;
+                    editCodeBtn.style.display = 'inline-block';
+                }
+                showExportButton(runId);
+                const completeDeploy = rawComplete.deployment;
+                if (completeDeploy && completeDeploy.url) {
+                    const fullDeployUrl = window.location.origin + completeDeploy.url;
+                    showDeployPanel(runId);
+                    const urlBlock = document.getElementById('deploy-url-block');
+                    const urlLink  = document.getElementById('deploy-live-url');
+                    if (urlBlock && urlLink) {
+                        urlLink.href = fullDeployUrl;
+                        urlLink.textContent = fullDeployUrl;
+                        urlBlock.style.display = 'block';
+                    }
+                    handlePhaseUpdate('deploy', 'completed');
+                    setDeployStep('packaging', 'done');
+                    setDeployStep('uploading', 'done');
+                    setDeployStep('live', 'done');
+                    setDeployStatusLabel('Live ✓');
+                    const dot = document.getElementById('deploy-status-dot');
+                    if (dot) { dot.style.background = 'var(--accent)'; dot.style.borderColor = 'var(--accent)'; }
+                    showPreview(fullDeployUrl);
+                    if (runId) loadDeployHistory(runId);
+                } else {
+                    const autoDeploy = document.getElementById('auto-deploy')?.checked || false;
+                    if (!autoDeploy) {
+                        const deployBtn = document.getElementById('btn-deploy-now');
+                        if (deployBtn) deployBtn.style.display = 'inline-block';
+                    }
+                }
+            });
+
+            // ── Live Preview: CODE phase complete ─────
+            eventSource.addEventListener('preview_ready', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    if (d.url) {
+                        const url = window.location.origin + d.url;
+                        showPreview(url);
+                        const split = document.getElementById('preview-split');
+                        if (split) {
+                            split.classList.add('preview-pulse');
+                            setTimeout(() => split.classList.remove('preview-pulse'), 1200);
+                        }
+                    }
+                } catch (_) {}
+            });
+
+            // ── Structured Verification Report ────────
+            eventSource.addEventListener('verify_report', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    _verifyReportData = d;
+                    renderVerifyChecklist(d);
+                    if (typeof switchTab === 'function') switchTab('verify');
+
+                    // Update phase indicator to reflect the actual verify result.
+                    // If any terminal checks failed, show red (failed); otherwise green (completed).
+                    // This ensures the phase stepper dot matches the individual check results.
+                    if (typeof d.totalChecks === 'number' && d.totalChecks > 0) {
+                        var allPassed = d.passed === true && d.passedCount === d.totalChecks;
+                        handlePhaseUpdate('verify', allPassed ? 'completed' : 'failed');
+                    }
+
+                    // Pre-update the completion banner with structured data
+                    // (safety net: even if 'complete' event is lost, banner shows correct result)
+                    updateCompletionBanner(d);
+                } catch (_) {}
+            });
+
+            // ── Self-Healing Loop Event Handlers ─────────────────
+            eventSource.addEventListener('self_heal_retry_start', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    const retryNum = d.retryNum || 1;
+                    const maxRetries = d.maxRetries || 3;
+                    // Show or update the retry status badge
+                    var badge = document.getElementById('self-heal-status');
+                    if (!badge) {
+                        badge = document.createElement('div');
+                        badge.id = 'self-heal-status';
+                        var verifyPanel = document.getElementById('terminal-content');
+                        if (verifyPanel) verifyPanel.insertBefore(badge, verifyPanel.firstChild);
+                    }
+                    badge.className = 'self-heal-retrying';
+                    badge.innerHTML = '&#x27F3; VERIFY failed &mdash; auto-retrying CODE phase (attempt ' + (retryNum + 1) + '/' + maxRetries + ')';
+                    // Also append to terminal stream so it's visible
+                    appendOutput('verify', '\n⟳ VERIFY failed — auto-retrying CODE phase (attempt ' + (retryNum + 1) + '/' + maxRetries + ')…\n');
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('self_heal_succeeded', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    var badge = document.getElementById('self-heal-status');
+                    if (badge) {
+                        badge.className = 'self-heal-success';
+                        badge.innerHTML = '&#x2713; Fixed on retry ' + (d.retryNum || '');
+                    }
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('self_heal_exhausted', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    var badge = document.getElementById('self-heal-status');
+                    if (badge) {
+                        badge.className = 'self-heal-failed';
+                        badge.innerHTML = '&#x2717; Auto-retry exhausted after ' + (d.retriesAttempted || 2) + ' attempt(s)';
+                    }
+                    // Show diagnoses below the verify checklist
+                    if (d.diagnoses && d.diagnoses.length > 0) {
+                        var diagHtml = '<div class="self-heal-diagnoses">';
+                        diagHtml += '<div class="self-heal-diagnoses-title">Auto-Retry Diagnoses</div>';
+                        d.diagnoses.forEach(function(diag, i) {
+                            diagHtml += '<div class="self-heal-diag-item">';
+                            diagHtml += '<div class="self-heal-diag-attempt">Attempt ' + (i + 1) + ' — Failed: ' + (diag.failedChecks || []).join(', ') + '</div>';
+                            diagHtml += '<div class="self-heal-diag-text">' + escHtml(diag.diagnosis || '') + '</div>';
+                            diagHtml += '</div>';
+                        });
+                        diagHtml += '</div>';
+                        var container = document.getElementById('terminal-content');
+                        if (container) {
+                            var diagEl = document.createElement('div');
+                            diagEl.innerHTML = diagHtml;
+                            container.appendChild(diagEl.firstChild);
+                        }
+                    }
+                } catch (_) {}
+            });
+
+            // ── Deploy Event Handlers ─────────────────
+            eventSource.addEventListener('deploy_progress', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    showDeployPanel(runId);
+                    if (d.status === 'deploy_started') {
+                        setDeployStep('packaging', 'running');
+                        setDeployStatusLabel('Packaging your work...');
+                    } else if (d.status === 'deploy_uploading') {
+                        setDeployStep('packaging', 'done');
+                        setDeployStep('uploading', 'running');
+                        setDeployStatusLabel('Uploading...');
+                    }
+                    appendOutput('deploy', `${d.message || d.status}\n`);
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('deploy_complete', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    showDeployPanel(runId);
+                    setDeployStep('packaging', 'done');
+                    setDeployStep('uploading', 'done');
+                    setDeployStep('live', 'done');
+                    setDeployStatusLabel('Live ✓');
+                    handlePhaseUpdate('deploy', 'completed');
+
+                    const urlBlock = document.getElementById('deploy-url-block');
+                    const urlLink = document.getElementById('deploy-live-url');
+                    if (urlBlock && urlLink && d.url) {
+                        const fullUrl = window.location.origin + d.url;
+                        urlLink.href = fullUrl;
+                        urlLink.textContent = fullUrl;
+                        urlBlock.style.display = 'block';
+                        showPreview(fullUrl);
+                    }
+
+                    const dot = document.getElementById('deploy-status-dot');
+                    if (dot) { dot.style.background = 'var(--accent)'; dot.style.borderColor = 'var(--accent)'; }
+
+                    const deployBtn = document.getElementById('btn-deploy-now');
+                    if (deployBtn) deployBtn.style.display = 'none';
+
+                    appendOutput('deploy', `✓ Live at ${d.url}\n✓ Version ${d.version} · ${d.fileCount} files\n`);
+                    switchTab('deploy');
+
+                    if (runId) loadDeployHistory(runId);
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('deploy_failed', (e) => {
+                try {
+                    _buildTerminal = true;
+                    const d = JSON.parse(e.data);
+                    handlePhaseUpdate('deploy', 'failed');
+                    setDeployStatusLabel('Deploy failed');
+                    const dot = document.getElementById('deploy-status-dot');
+                    if (dot) { dot.style.background = 'var(--error)'; dot.style.borderColor = 'var(--error)'; }
+                    appendOutput('deploy', `✗ Deploy failed: ${d.message || 'unknown error'}\n`);
+                    eventSource.close();
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('deploy_rollback', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    setDeployStatusLabel(`Restored v${d.version}`);
+                    appendOutput('deploy', `↩ Rolled back to version ${d.version}\n`);
+                    if (runId) loadDeployHistory(runId);
+                    const previewIframe = document.getElementById('preview-iframe');
+                    if (previewIframe && previewIframe.src) {
+                        previewIframe.src = previewIframe.src;
+                    }
+                } catch (_) {}
+            });
+
+            // ── Intent Gate Classification ────────────
+            eventSource.addEventListener('intent_classified', (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    _currentIntentClass = d.intent_class || null;
+
+                    const badgeBar   = document.getElementById('intent-badge-bar');
+                    const badgeChip  = document.getElementById('intent-class-badge');
+                    if (badgeBar && badgeChip && _currentIntentClass) {
+                        const labelMap = {
+                            STATIC_SURFACE:       '🌐 Landing Page',
+                            INTERACTIVE_LIGHT_APP:'⚡ Light App',
+                            PRODUCT_SYSTEM:       '🏗 Full Product',
+                        };
+                        badgeChip.textContent = labelMap[_currentIntentClass] || _currentIntentClass;
+                        badgeBar.style.display = 'flex';
+                    }
+                } catch (_) {}
+            });
+
+            eventSource.addEventListener('error', (e) => {
+                // Check if this is a pipeline error event vs connection error
+                try {
+                    const data = JSON.parse(e.data);
+                    // Actual pipeline error from server
+                    showError(data.message || 'Something went wrong while building');
+                    _buildTerminal = true;
+                    eventSource.close();
+                    _liveEventSource = null;
+                    isRunning = false;
+                    return;
+                } catch (_) {}
+
+                // SSE connection error — stream dropped
+                eventSource.close();
+                _liveEventSource = null;
+
+                // Normal close after build completed — not an error
+                if (_buildTerminal || !isRunning) {
+                    return;
+                }
+
+                // Build still running — attempt reconnection
+                _showConnLostBanner();
+                _scheduleReconnect(runId);
+            });
+        }
+
+        // ── Connection Lost Banner ────────────────────
+        function _showConnLostBanner() {
+            const banner = document.getElementById('connection-lost-banner');
+            const text = document.getElementById('conn-lost-text');
+            if (banner) banner.classList.add('show');
+            if (text) text.textContent = 'Connection lost — reconnecting...';
+            setTerminalStatus('', 'reconnecting...');
+        }
+
+        function _hideConnLostBanner() {
+            const banner = document.getElementById('connection-lost-banner');
+            if (banner) banner.classList.remove('show');
+        }
+
+        // ── Auto-Reconnect with Backoff ───────────────
+        function _scheduleReconnect(runId) {
+            if (_reconnectTimer) clearTimeout(_reconnectTimer);
+            _reconnectAttempts++;
+
+            // Cap at 5 retries (2s, 4s, 8s, 16s, 30s)
+            if (_reconnectAttempts > 5) {
+                const text = document.getElementById('conn-lost-text');
+                if (text) text.textContent = 'Connection lost — tap Reconnect to retry';
+                setTerminalStatus('', 'disconnected');
+                return;
+            }
+
+            const delay = Math.min(_reconnectAttempts * 2000, 30000);
+            const text = document.getElementById('conn-lost-text');
+            if (text) text.textContent = `Connection lost — retrying in ${delay / 1000}s...`;
+
+            _reconnectTimer = setTimeout(() => {
+                if (_buildTerminal) return; // Build finished while waiting
+                _doConnect(runId);
+            }, delay);
+        }
+
+        // Manual reconnect button handler
+        function manualReconnect() {
+            if (!_streamRunId) return;
+            if (_reconnectTimer) clearTimeout(_reconnectTimer);
+            _reconnectAttempts = 0;
+            const text = document.getElementById('conn-lost-text');
+            if (text) text.textContent = 'Reconnecting...';
+            _doConnect(_streamRunId);
+        }
+        window.manualReconnect = manualReconnect;
+
+        // ── Visibility Change: Reconnect on Tab Focus ─
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            if (!_streamRunId || _buildTerminal) return;
+
+            // Check if current connection is dead
+            if (!_liveEventSource || _liveEventSource.readyState === EventSource.CLOSED) {
+                // Connection dropped while tab was hidden — reconnect
+                _reconnectAttempts = 0;
+                _showConnLostBanner();
+                const text = document.getElementById('conn-lost-text');
+                if (text) text.textContent = 'Reconnecting...';
+                _doConnect(_streamRunId);
+            }
+        });
+
+        // ── Live Cost Display ────────────────────────
+        function updateLiveCost(totalCost, cap, state) {
+            const bar = document.getElementById('live-cost-bar');
+            const val = document.getElementById('live-cost-value');
+            const track = document.getElementById('live-budget-track');
+            const fill = document.getElementById('live-budget-fill');
+            const hint = document.getElementById('live-budget-hint');
+
+            bar.style.display = 'block';
+            val.textContent = fmtUsd(totalCost);
+
+            if (state === 'warning') {
+                val.style.color = 'var(--warning)';
+                bar.style.borderColor = 'rgba(245,158,11,.4)';
+            } else if (state === 'exceeded') {
+                val.style.color = 'var(--error)';
+                bar.style.borderColor = 'rgba(239,68,68,.4)';
+            } else {
+                val.style.color = 'var(--accent)';
+                bar.style.borderColor = 'var(--border)';
+            }
+
+            if (cap) {
+                track.style.display = 'block';
+                const pct = Math.min((totalCost / cap) * 100, 100);
+                fill.style.width = `${pct.toFixed(1)}%`;
+                fill.style.background = state === 'exceeded' ? 'var(--error)' : state === 'warning' ? 'var(--warning)' : 'var(--accent)';
+                hint.style.display = 'block';
+                hint.textContent = `${fmtUsd(totalCost)} of ${fmtUsd(cap)} cap`;
+            }
+        }
+
+        function showNotice(msg, type) {
+            // Append notice to current terminal tab output
+            const currentContent = phaseContent[currentPhase] || '';
+            phaseContent[currentPhase] = currentContent + `\n\n[${type.toUpperCase()}] ${msg}`;
+            renderTerminal(currentPhase);
+        }
+
+        // ── Phase Updates ─────────────────────────────
+        function handlePhaseUpdate(phase, status) {
+            const indicator = document.querySelector(`.phase-indicator[data-phase="${phase}"]`);
+            if (!indicator) return;
+
+            indicator.setAttribute('data-status', status);
+
+            if (status === 'running') {
+                currentPhase = phase;
+                phaseStartTimes[phase] = Date.now();
+                switchTab(phase);
+
+                // Light up connector before this phase
+                const idx = PHASES.indexOf(phase);
+                if (idx > 0) {
+                    const connectors = document.querySelectorAll('.phase-connector');
+                    connectors[idx - 1].classList.add('lit');
+                }
+            }
+
+            if (status === 'completed' || status === 'failed') {
+                // Record elapsed time and display it in the stepper
+                if (phaseStartTimes[phase]) {
+                    const elapsed = (Date.now() - phaseStartTimes[phase]) / 1000;
+                    phaseElapsed[phase] = elapsed;
+                    const timeEl = document.getElementById(`ptime-${phase}`);
+                    if (timeEl) {
+                        timeEl.textContent = elapsed.toFixed(1) + 's';
+                        timeEl.style.display = 'block';
+                    }
+                }
+            }
+
+            if (status === 'completed') {
+                // Light up connector after this phase
+                const idx = PHASES.indexOf(phase);
+                const connectors = document.querySelectorAll('.phase-connector');
+                if (idx < connectors.length) {
+                    connectors[idx].classList.add('lit');
+                }
+            }
+
+            if (status === 'completed' || status === 'failed') {
+                // When verify finishes (passed or failed), pre-update the banner from the best available data.
+                // Priority: stored verify_report > terminal text inference.
+                // This is a safety net: if the SSE 'complete' event is lost (connection
+                // drop on Render), the banner still shows the correct result.
+                if (phase === 'verify') {
+                    var bannerData = _verifyReportData || inferVerifyResultsFromOutput();
+                    if (bannerData) {
+                        updateCompletionBanner(bannerData);
+                        completedBanner.classList.add('show');
+                    }
+                }
+            }
+        }
+
+        // ── Completion Banner Logic ───────────────────
+        // Centralized banner update — called from 'complete' event and as fallback.
+        //
+        // IMPORTANT: The banner defaults to NEUTRAL gray styling. Green/success
+        // requires explicit `.success` class, which is ONLY added when ALL checks
+        // pass. This ensures no fallback/empty-data path can look like success.
+        function updateCompletionBanner(data) {
+            var bannerTitle = completedBanner.querySelector('h3');
+            var bannerText = completedBanner.querySelector('p');
+            // Remove ALL state classes — we'll add the correct one below
+            completedBanner.classList.remove('success', 'warning', 'error');
+            // Remove any previous failed-checks detail block
+            var oldDetails = completedBanner.querySelector('.banner-failed-checks');
+            if (oldDetails) oldDetails.remove();
+
+            var pc = typeof data.passedCount === 'number' ? data.passedCount : 0;
+            var tc = typeof data.totalChecks === 'number' ? data.totalChecks : 0;
+            var checks = Array.isArray(data.checks) ? data.checks : [];
+
+            // Guard: only show success if BOTH the boolean flag AND the counts agree
+            var allPassed = (data.passed === true) && (tc > 0) && (pc === tc);
+
+            if (allPassed) {
+                // All checks passed — explicit green success
+                completedBanner.classList.add('success');
+                bannerTitle.textContent = 'Build Complete \u2713';
+                bannerText.textContent = 'All ' + tc + ' checks passed. Your build is done.';
+            } else if (tc > 0 && pc < tc && pc > 0) {
+                // Some checks failed — amber warning with failed check names
+                completedBanner.classList.add('warning');
+                bannerTitle.textContent = 'Completed With Issues \u26A0\uFE0F';
+                bannerText.textContent = pc + ' of ' + tc + ' checks passed \u2014 ' + (tc - pc) + ' failed.';
+                appendFailedChecks(completedBanner, checks);
+            } else if (tc > 0 && pc === 0) {
+                // All checks failed — red error with failed check names
+                completedBanner.classList.add('error');
+                bannerTitle.textContent = 'Build Needs Attention \u2717';
+                bannerText.textContent = '0 of ' + tc + ' checks passed. All checks failed.';
+                appendFailedChecks(completedBanner, checks);
+            } else {
+                // No verification data — neutral gray (NOT green)
+                bannerTitle.textContent = 'Build finished';
+                bannerText.textContent = 'Verification data unavailable.';
+            }
+        }
+
+        // Append a list of failed check names below the banner text
+        function appendFailedChecks(banner, checks) {
+            if (!Array.isArray(checks) || checks.length === 0) return;
+            var failed = checks.filter(function(c) { return !c.passed; });
+            if (failed.length === 0) return;
+
+            var container = document.createElement('div');
+            container.className = 'banner-failed-checks';
+            failed.forEach(function(c) {
+                var item = document.createElement('div');
+                item.className = 'failed-check-item';
+                item.textContent = c.name || 'Unknown check';
+                container.appendChild(item);
+            });
+            // Insert after the <p> element
+            var pEl = banner.querySelector('p');
+            if (pEl && pEl.nextSibling) {
+                banner.insertBefore(container, pEl.nextSibling);
+            } else {
+                banner.appendChild(container);
+            }
+        }
+
+        // Fallback: parse verify results from streamed terminal output
+        // This runs when the verify phase completes, so even if the SSE 'complete'
+        // event is lost (connection drop), we still update the banner correctly.
+        function inferVerifyResultsFromOutput() {
+            var text = phaseContent['verify'] || '';
+            // Look for the "Result:" line the QA agent streams
+            var match = text.match(/(\d+)\/(\d+) checks passed/);
+            if (match) {
+                var pc = parseInt(match[1], 10);
+                var tc = parseInt(match[2], 10);
+                return { passed: pc === tc, passedCount: pc, totalChecks: tc, errors: [], warnings: [] };
+            }
+            return null;
+        }
+
+        // ── Output ────────────────────────────────────
+        function appendOutput(phase, content) {
+            phaseContent[phase] += content;
+
+            if (phase === activeTab) {
+                renderTerminal(phase);
+                // Auto-scroll to bottom
+                terminalBody.scrollTop = terminalBody.scrollHeight;
+            }
+
+            // Update tab to indicate new content
+            const tab = document.querySelector(`.terminal-tab[data-tab="${phase}"]`);
+            if (tab && phase !== activeTab) {
+                tab.style.color = 'var(--text)';
+            }
+        }
+
+        // ── Tab Switching ─────────────────────────────
+        function switchTab(tab) {
+            activeTab = tab;
+
+            document.querySelectorAll('.terminal-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.tab === tab);
+                if (t.dataset.tab === tab) {
+                    t.style.color = '';  // Reset indicator
+                }
+            });
+
+            renderTerminal(tab);
+            terminalBody.scrollTop = terminalBody.scrollHeight;
+
+            // Inject any pending verify checklist that arrived while tab was inactive
+            if (tab === 'verify' && window._pendingVerifyChecklist) {
+                var container = document.getElementById('terminal-content');
+                if (container) {
+                    var wrapper = document.createElement('div');
+                    wrapper.innerHTML = window._pendingVerifyChecklist;
+                    container.appendChild(wrapper.firstChild);
+                }
+                window._pendingVerifyChecklist = null;
+            }
+        }
+
+        // ── Render Terminal ───────────────────────────
+        function renderTerminal(phase) {
+            const raw = phaseContent[phase] || '';
+            if (!raw) {
+                terminalContent.innerHTML = '<span style="color: var(--text-dim)">Waiting for output...</span>';
+                return;
+            }
+            terminalContent.innerHTML = renderMarkdown(raw);
+        }
+
+        // ── Minimal Markdown Renderer ─────────────────
+        function renderMarkdown(text) {
+            // Escape HTML first
+            let html = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            // Code blocks (``` ... ```)
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
+                return '<div class="code-block">' + code.trim() + '</div>';
+            });
+
+            // Headers
+            html = html.replace(/^### (.+)$/gm, '<div class="md-h3">$1</div>');
+            html = html.replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>');
+
+            // Bold
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+            // Inline code
+            html = html.replace(/`([^`]+)`/g, '<span class="inline-code">$1</span>');
+
+            // Check marks
+            html = html.replace(/^(✓ .+)$/gm, '<span class="check-pass">$1</span>');
+            html = html.replace(/^(✗ .+)$/gm, '<span class="check-fail">$1</span>');
+
+            return html;
+        }
+
+        // ── Status ────────────────────────────────────
+        function setTerminalStatus(cls, text) {
+            terminalStatus.className = 'terminal-status ' + cls;
+            terminalStatus.querySelector('span').textContent = text;
+        }
+
+        // ── Error ─────────────────────────────────────
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            errorBanner.classList.add('show');
+            setTerminalStatus('', 'error');
+            cursor.style.display = 'none';
+        }
+
+        // ── Reset ─────────────────────────────────────
+        function resetPhaseIndicators() {
+            document.querySelectorAll('.phase-indicator').forEach(ind => {
+                ind.setAttribute('data-status', 'pending');
+            });
+            document.querySelectorAll('.phase-connector').forEach(c => {
+                c.classList.remove('lit');
+            });
+            document.querySelectorAll('.terminal-tab').forEach(t => {
+                t.style.color = '';
+            });
+            // Reset timing displays
+            PHASES.forEach(p => {
+                delete phaseStartTimes[p];
+                delete phaseElapsed[p];
+                const timeEl = document.getElementById(`ptime-${p}`);
+                if (timeEl) { timeEl.textContent = ''; timeEl.style.display = 'none'; }
+            });
+            // Reset View Full Trace stepper button
+            const traceBtnStepper = document.getElementById('btn-view-trace-stepper');
+            if (traceBtnStepper) {
+                traceBtnStepper.href = '#';
+                traceBtnStepper.classList.add('dimmed');
+            }
+            activeTab = '_intent_gate';
+            switchTab('_intent_gate');
+            cursor.style.display = '';
+        }
+
+        // "Build another" — routes to new-task with credit nudge for onboarding, otherwise resets inline
+        window.handleBuildAnother = function() {
+            if (isOnboardingRun) {
+                window.location.href = '/new-task?first_run_complete=true';
+            } else {
+                window.resetPipeline();
+            }
+        };
+
+        // Global reset function
+        window.resetPipeline = function() {
+            isRunning = false;
+            isPaused = false;
+            currentRunId = null;
+            selectedOverrideAgent = null;
+            runBtn.disabled = false;
+            inputSection.style.display = '';
+            pipelineSection.style.display = 'none';
+            completedBanner.classList.remove('show', 'success', 'warning', 'error');
+            errorBanner.classList.remove('show');
+            document.getElementById('intervention-bar').style.display = 'none';
+            document.getElementById('paused-banner').classList.remove('show');
+            document.getElementById('inject-panel').classList.remove('show');
+            document.getElementById('override-panel').classList.remove('show');
+            PHASES.forEach(p => { phaseContent[p] = ''; });
+            _verifyReportData = null;
+            resetPhaseIndicators();
+            setTerminalStatus('', 'waiting');
+            // Clear deploy state
+            const deployPanel = document.getElementById('deploy-panel');
+            if (deployPanel) deployPanel.style.display = 'none';
+            const deployBtn = document.getElementById('btn-deploy-now');
+            if (deployBtn) { deployBtn.style.display = 'none'; deployBtn.disabled = false; deployBtn.textContent = '🚀 Put it live'; }
+            const editCodeBtnReset = document.getElementById('btn-edit-code');
+            if (editCodeBtnReset) { editCodeBtnReset.style.display = 'none'; editCodeBtnReset.href = '#'; }
+            document.getElementById('deploy-url-block').style.display = 'none';
+            document.getElementById('deploy-history-block').style.display = 'none';
+            document.getElementById('deploy-history-list').innerHTML = '';
+            ['packaging', 'uploading', 'live'].forEach(s => setDeployStep(s, 'pending'));
+            setDeployStatusLabel('—');
+            const dot = document.getElementById('deploy-status-dot');
+            if (dot) { dot.style.background = 'rgba(20,184,166,0.15)'; dot.style.borderColor = '#14b8a6'; }
+            // Clear preview panel
+            previewUrl = null;
+            const previewSplit = document.getElementById('preview-split');
+            if (previewSplit) previewSplit.classList.remove('has-preview');
+            const previewIframe = document.getElementById('preview-iframe');
+            if (previewIframe) { previewIframe.src = 'about:blank'; previewIframe.style.display = 'none'; }
+            const previewEmpty = document.getElementById('preview-empty');
+            if (previewEmpty) previewEmpty.style.display = 'flex';
+            // Hide export button
+            const exportWrapper = document.getElementById('btn-export-wrapper');
+            if (exportWrapper) { exportWrapper.style.display = 'none'; }
+            const exportDropdown = document.getElementById('export-dropdown');
+            if (exportDropdown) exportDropdown.style.display = 'none';
+            promptEl.focus();
+        };
+
+        // ── Intervention Helpers ──────────────────────
+        function setInterventionStatus(msg) {
+            const el = document.getElementById('intervention-status');
+            if (el) el.textContent = msg;
+        }
+
+        // ── Verification Checklist Renderer ───────────
+        // Called when 'verify_report' SSE event fires.
+        // Injects a structured checklist into the verify tab content area.
+        // Helper to toggle check expansion
+        function toggleCheckExpand(checkId) {
+            var checkEl = document.getElementById(checkId);
+            if (!checkEl) return;
+            var isExpanded = checkEl.getAttribute('data-expanded') === 'true';
+            checkEl.setAttribute('data-expanded', !isExpanded);
+        }
+
+        // ── Intent-aware section filtering ─────────────────────────────────────
+        // Returns true if a check name is relevant for the given intent_class.
+        // STATIC_SURFACE hides backend/db checks (expected to fail — not applicable).
+        // INTERACTIVE_LIGHT_APP hides db checks unless a db section is present.
+        // PRODUCT_SYSTEM / null: show everything.
+        function _checkRelevantForIntent(checkName, intentClass) {
+            if (!intentClass || intentClass === 'PRODUCT_SYSTEM') return true;
+            const lower = (checkName || '').toLowerCase();
+            const isDbCheck = lower.includes('database') || lower.includes(' db ') || lower.includes('migration');
+            const isBackendCheck = lower.includes('server') || lower.includes('api') || lower.includes('backend');
+            if (intentClass === 'STATIC_SURFACE') {
+                // Hide DB and backend checks — not applicable for static builds
+                return !isDbCheck && !isBackendCheck;
+            }
+            if (intentClass === 'INTERACTIVE_LIGHT_APP') {
+                // Hide DB checks (db is optional)
+                return !isDbCheck;
+            }
+            return true;
+        }
+
+        // Returns true if a plan section label is relevant for the given intent_class.
+        function _sectionRelevantForIntent(sectionLabel, intentClass) {
+            if (!intentClass || intentClass === 'PRODUCT_SYSTEM') return true;
+            const lower = (sectionLabel || '').toLowerCase();
+            const isDb = lower.includes('database') || lower.includes('db') || lower.includes('data store');
+            const isBackend = lower.includes('backend') || lower.includes('server') || lower.includes('api');
+            if (intentClass === 'STATIC_SURFACE') return !isDb && !isBackend;
+            if (intentClass === 'INTERACTIVE_LIGHT_APP') return !isDb;
+            return true;
+        }
+
+        function renderVerifyChecklist(data) {
+            var checks = Array.isArray(data.checks) ? data.checks : [];
+            var sections = Array.isArray(data.sectionReport) ? data.sectionReport : [];
+
+            // Filter checks and sections based on intent class
+            checks   = checks.filter(c => _checkRelevantForIntent(c.name, _currentIntentClass));
+            sections = sections.filter(s => _sectionRelevantForIntent(s.label, _currentIntentClass));
+            var passedCount = typeof data.passedCount === 'number' ? data.passedCount : checks.filter(function(c) { return c.passed; }).length;
+            var totalChecks = typeof data.totalChecks === 'number' ? data.totalChecks : checks.length;
+            var passed = data.passed;
+
+            // Build HTML
+            var html = '<div class="verify-report">';
+            html += '<div class="verify-report-title">&#x2713; Verification Checklist</div>';
+            html += '<div class="verify-report-grid">';
+
+            // Helper to build a single check card with collapsible alternatives
+            function buildCheckCard(c, index, category) {
+                var checkId = 'check-' + category + '-' + index;
+                var cls = c.passed ? 'passed' : 'failed';
+                var dotCls = c.passed ? 'pass' : 'fail';
+                var icon = c.passed ? '&#x2713;' : '&#x2717;';
+                var statusLabel = c.passed ? 'Passed' : 'Failed';
+                var hasAlternative = c.alternative || c.reasoning;
+
+                var card = '<div id="' + checkId + '" class="verify-check-card ' + cls + '" data-expanded="false">';
+
+                // Main check display (always visible)
+                card += '<div class="verify-check-header" onclick="toggleCheckExpand(\'' + checkId + '\')">';
+                card += '<div class="verify-check-dot ' + dotCls + '">' + icon + '</div>';
+                card += '<span class="verify-check-name">' + escHtml(c.name) + '</span>';
+                card += '<span class="verify-check-status">' + statusLabel + '</span>';
+                if (hasAlternative) {
+                    card += '<span class="verify-check-expand-hint">›</span>';
+                }
+                card += '</div>';
+
+                // Expanded details (hidden by default)
+                if (hasAlternative) {
+                    card += '<div class="verify-check-details">';
+                    if (c.reasoning) {
+                        card += '<div class="verify-check-reasoning">';
+                        card += '<div class="verify-check-reasoning-label">Why this outcome</div>';
+                        card += '<div class="verify-check-reasoning-text">' + escHtml(c.reasoning) + '</div>';
+                        card += '</div>';
+                    }
+                    if (c.alternative) {
+                        card += '<div class="verify-check-alternative">';
+                        card += '<div class="verify-check-alternative-label">Alternative outcome</div>';
+                        card += '<div class="verify-check-alternative-text">' + escHtml(c.alternative) + '</div>';
+                        card += '</div>';
+                    }
+                    card += '</div>';
+                }
+
+                card += '</div>';
+                return card;
+            }
+
+            // Artifact checks
+            var artifactChecks = checks.filter(function(c) { return c.category === 'artifacts' || !c.category; });
+            if (artifactChecks.length > 0) {
+                html += '<div class="verify-section-label">Artifacts</div>';
+                artifactChecks.forEach(function(c, idx) {
+                    html += buildCheckCard(c, idx, 'artifact');
+                });
+            }
+
+            // Preview DOM checks
+            var previewChecks = checks.filter(function(c) { return c.category === 'preview'; });
+            if (previewChecks.length > 0) {
+                html += '<hr class="verify-section-divider">';
+                html += '<div class="verify-section-label">Rendered Output</div>';
+                previewChecks.forEach(function(c, idx) {
+                    html += buildCheckCard(c, idx, 'preview');
+                });
+            }
+
+            // Section presence (from plan)
+            if (sections.length > 0) {
+                html += '<hr class="verify-section-divider">';
+                html += '<div class="verify-section-label">Plan Sections</div>';
+                sections.forEach(function(s, idx) {
+                    var checkId = 'check-section-' + idx;
+                    var cls = s.found ? 'passed' : '';
+                    var dotCls = s.found ? 'pass' : 'warn';
+                    var icon = s.found ? '&#x2713;' : '&#x26A0;';
+                    var statusLabel = s.found ? 'Found' : 'Missing';
+
+                    html += '<div id="' + checkId + '" class="verify-check-card ' + cls + '" data-expanded="false">';
+                    html += '<div class="verify-check-header">';
+                    html += '<div class="verify-check-dot ' + dotCls + '">' + icon + '</div>';
+                    html += '<span class="verify-check-name">' + escHtml(s.label) + '</span>';
+                    html += '<span class="verify-check-status">' + statusLabel + '</span>';
+                    html += '</div>';
+                    html += '</div>';
+                });
+            }
+
+            // Summary row
+            var badgeCls = passed ? 'all-pass' : (passedCount === 0 ? 'failed' : 'partial');
+            var badgeLabel = passed ? 'All checks passed' : (passedCount + '/' + totalChecks + ' passed');
+            html += '<div class="verify-summary-row">';
+            html += '<span>' + totalChecks + ' checks run</span>';
+            html += '<span class="verify-summary-badge ' + badgeCls + '">' + badgeLabel + '</span>';
+            if (data.selfHealed) {
+                html += '<span class="verify-summary-badge self-heal-badge">&#x2713; Fixed on retry ' + (data.selfHealRetryNum || '') + '</span>';
+            }
+            html += '</div>';
+
+            html += '</div></div>'; // end grid + report
+
+            // Inject into verify tab content — append after streamed text
+            var container = document.getElementById('terminal-content');
+            if (container && activeTab === 'verify') {
+                // Append into verify phase content area
+                var wrapper = document.createElement('div');
+                wrapper.innerHTML = html;
+                container.appendChild(wrapper.firstChild);
+            } else {
+                // Store for when user switches to verify tab
+                if (!window._pendingVerifyChecklist) {
+                    window._pendingVerifyChecklist = html;
+                }
+            }
+        }
+
+        // Simple HTML escape helper (used by renderVerifyChecklist)
+        function escHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // ── Deploy Helpers ────────────────────────────
+        function showDeployPanel(runId) {
+            const panel = document.getElementById('deploy-panel');
+            if (panel) panel.style.display = 'block';
+            handlePhaseUpdate('deploy', 'running');
+            switchTab('deploy');
+        }
+
+        function setDeployStep(step, status) {
+            const el = document.getElementById(`deploy-step-${step}`);
+            if (el) el.setAttribute('data-status', status);
+        }
+
+        function setDeployStatusLabel(text) {
+            const el = document.getElementById('deploy-status-label');
+            if (el) el.textContent = text;
+        }
+
+        // ── Live Preview Panel ────────────────────────
+        function showPreview(url) {
+            previewUrl = url;
+            const split = document.getElementById('preview-split');
+            const iframe = document.getElementById('preview-iframe');
+            const empty = document.getElementById('preview-empty');
+            if (!split || !iframe) return;
+
+            split.classList.add('has-preview');
+            iframe.src = url;
+            iframe.style.display = 'block';
+            if (empty) empty.style.display = 'none';
+        }
+
+        function refreshPreview() {
+            const iframe = document.getElementById('preview-iframe');
+            if (iframe && previewUrl) {
+                iframe.src = previewUrl;
+            }
+        }
+        window.refreshPreview = refreshPreview;
+
+        function openInNewTab() {
+            if (previewUrl) window.open(previewUrl, '_blank', 'noopener,noreferrer');
+        }
+        window.openInNewTab = openInNewTab;
+
+        // Resize handle drag
+        (function initResizeHandle() {
+            const handle = document.getElementById('resize-handle');
+            const split = document.getElementById('preview-split');
+            const wrapper = document.getElementById('terminal-wrapper');
+            if (!handle || !split || !wrapper) return;
+
+            let dragging = false;
+            let startX = 0;
+            let startWrapperPct = 55;
+
+            handle.addEventListener('mousedown', (e) => {
+                if (!split.classList.contains('has-preview')) return;
+                dragging = true;
+                startX = e.clientX;
+                const splitW = split.getBoundingClientRect().width;
+                const wrapperW = wrapper.getBoundingClientRect().width;
+                startWrapperPct = splitW > 0 ? (wrapperW / splitW) * 100 : 55;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!dragging) return;
+                const splitW = split.getBoundingClientRect().width;
+                if (splitW === 0) return;
+                const dx = e.clientX - startX;
+                const deltaPct = (dx / splitW) * 100;
+                const newPct = Math.max(30, Math.min(startWrapperPct + deltaPct, 70));
+                wrapper.style.flex = `0 0 ${newPct}%`;
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (dragging) {
+                    dragging = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                }
+            });
+        })();
+
+        async function triggerDeploy() {
+            if (!currentRunId) return;
+            const btn = document.getElementById('btn-deploy-now');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Deploying...'; }
+            showDeployPanel(currentRunId);
+            setDeployStep('packaging', 'running');
+            setDeployStatusLabel('Packaging...');
+
+            try {
+                const res = await fetch(`/api/pipeline/${currentRunId}/deploy`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) {
+                    setDeployStatusLabel(`Error: ${data.message}`);
+                    if (btn) { btn.disabled = false; btn.textContent = '🚀 Put it live'; }
+                }
+            } catch (e) {
+                setDeployStatusLabel('Deploy request failed');
+                if (btn) { btn.disabled = false; btn.textContent = '🚀 Put it live'; }
+            }
+        }
+        window.triggerDeploy = triggerDeploy;
+
+        // ── Compliance Export ─────────────────────────
+        function showExportButton(runId) {
+            if (!runId) return;
+            const wrapper = document.getElementById('btn-export-wrapper');
+            if (wrapper) {
+                wrapper.style.display = 'inline-flex';
+                wrapper.setAttribute('data-run-id', runId);
+            }
+        }
+
+        function toggleExportDropdown(evt) {
+            evt.stopPropagation();
+            const dropdown = document.getElementById('export-dropdown');
+            if (!dropdown) return;
+            const isVisible = dropdown.style.display !== 'none';
+            dropdown.style.display = isVisible ? 'none' : 'block';
+            if (!isVisible) {
+                // Close on next outside click
+                setTimeout(() => {
+                    document.addEventListener('click', function closeDropdown() {
+                        dropdown.style.display = 'none';
+                        document.removeEventListener('click', closeDropdown);
+                    }, { once: true });
+                }, 0);
+            }
+        }
+        window.toggleExportDropdown = toggleExportDropdown;
+
+        function triggerExport(format) {
+            const wrapper = document.getElementById('btn-export-wrapper');
+            const runId = wrapper ? wrapper.getAttribute('data-run-id') : currentRunId;
+            if (!runId) { alert('No run ID available.'); return; }
+            const dropdown = document.getElementById('export-dropdown');
+            if (dropdown) dropdown.style.display = 'none';
+            window.location.href = `/api/pipeline/${runId}/export?format=${format}`;
+        }
+        window.triggerExport = triggerExport;
+
+        async function loadDeployHistory(runId) {
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/deploy/history`);
+                const data = await res.json();
+                if (!data.success || !data.history?.length) return;
+
+                const block = document.getElementById('deploy-history-block');
+                const list = document.getElementById('deploy-history-list');
+                if (!block || !list) return;
+
+                list.innerHTML = data.history.map(d => `
+                    <div style="display:flex;align-items:center;gap:.5rem;padding:.3rem .5rem;background:var(--surface-2);border-radius:6px">
+                        <span style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--text-dim);min-width:30px">v${d.version}</span>
+                        <span style="font-family:'DM Mono',monospace;font-size:.75rem;color:${d.status === 'deployed' ? 'var(--accent)' : 'var(--error)'}">${d.status}</span>
+                        <span style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--text-dim);flex:1">${d.file_count} files · ${d.deploy_type}</span>
+                        ${d.status === 'deployed' && !d.is_active ?
+                            `<button onclick="doRollback('${runId}', ${d.version})" style="font-family:'DM Mono',monospace;font-size:.75rem;padding:.15rem .4rem;background:rgba(20,184,166,0.08);border:1px solid rgba(20,184,166,0.2);border-radius:4px;color:#14b8a6;cursor:pointer">Restore</button>` : ''}
+                        ${d.is_active ? '<span style="font-family:\'DM Mono\',monospace;font-size:.75rem;color:var(--accent)">● active</span>' : ''}
+                    </div>
+                `).join('');
+                block.style.display = 'block';
+            } catch (_) {}
+        }
+
+        async function doRollback(runId, version) {
+            try {
+                const res = await fetch(`/api/pipeline/${runId}/deploy/rollback/${version}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    setDeployStatusLabel(`Restored v${version}`);
+                    loadDeployHistory(runId);
+                    // Reload iframe to reflect rolled-back version
+                    const previewIframe = document.getElementById('preview-iframe');
+                    if (previewIframe && previewIframe.src) {
+                        previewIframe.src = previewIframe.src;
+                    }
+                }
+            } catch (_) {}
+        }
+        window.doRollback = doRollback;
+
+        // ── Pause/Resume ──────────────────────────────
+        async function doPause() {
+            if (!currentRunId || isPaused) return;
+            try {
+                const res = await fetch(`/api/pipeline/${currentRunId}/pause`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    setInterventionStatus('pause requested...');
+                } else {
+                    setInterventionStatus(`⚠ ${data.message}`);
+                    setTimeout(() => setInterventionStatus(''), 3000);
+                }
+            } catch (e) {
+                setInterventionStatus('⚠ request failed');
+                setTimeout(() => setInterventionStatus(''), 3000);
+            }
+        }
+        window.doPause = doPause;
+
+        async function doResume() {
+            if (!currentRunId || !isPaused) return;
+            try {
+                const res = await fetch(`/api/pipeline/${currentRunId}/resume`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) {
+                    setInterventionStatus(`⚠ ${data.message}`);
+                    setTimeout(() => setInterventionStatus(''), 3000);
+                }
+            } catch (e) {
+                setInterventionStatus('⚠ request failed');
+                setTimeout(() => setInterventionStatus(''), 3000);
+            }
+        }
+        window.doResume = doResume;
+
+        // ── Instruction Injection ─────────────────────
+        function toggleInjectPanel() {
+            const panel = document.getElementById('inject-panel');
+            const isShowing = panel.classList.contains('show');
+            panel.classList.toggle('show', !isShowing);
+            if (!isShowing) {
+                document.getElementById('inject-input').focus();
+                // Hide override panel
+                document.getElementById('override-panel').classList.remove('show');
+            }
+        }
+        window.toggleInjectPanel = toggleInjectPanel;
+
+        async function sendInjection() {
+            if (!currentRunId) return;
+            const input = document.getElementById('inject-input');
+            const btn = document.getElementById('inject-send-btn');
+            const message = input.value.trim();
+            if (!message) return;
+
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/pipeline/${currentRunId}/inject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    input.value = '';
+                } else {
+                    setInterventionStatus(`⚠ ${data.message}`);
+                    setTimeout(() => setInterventionStatus(''), 3000);
+                }
+            } catch (e) {
+                setInterventionStatus('⚠ note failed to send');
+                setTimeout(() => setInterventionStatus(''), 3000);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+        window.sendInjection = sendInjection;
+
+        // Enter key in inject input
+        document.getElementById('inject-input')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') sendInjection();
+        });
+
+        // ── Agent Override ────────────────────────────
+        function toggleOverridePanel() {
+            const panel = document.getElementById('override-panel');
+            const isShowing = panel.classList.contains('show');
+            panel.classList.toggle('show', !isShowing);
+            if (!isShowing) {
+                // Hide inject panel
+                document.getElementById('inject-panel').classList.remove('show');
+            }
+        }
+        window.toggleOverridePanel = toggleOverridePanel;
+
+        function selectOverrideAgent(btn) {
+            document.querySelectorAll('.override-agent-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedOverrideAgent = btn.dataset.agent;
+        }
+        window.selectOverrideAgent = selectOverrideAgent;
+
+        async function sendOverride() {
+            if (!currentRunId || !selectedOverrideAgent) {
+                setInterventionStatus('⚠ select a step first');
+                setTimeout(() => setInterventionStatus(''), 3000);
+                return;
+            }
+            const promptInput = document.getElementById('override-prompt-input');
+            const btn = document.getElementById('override-send-btn');
+            const prompt = promptInput.value.trim();
+            if (!prompt) return;
+
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/pipeline/${currentRunId}/override`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent: selectedOverrideAgent, prompt })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    promptInput.value = '';
+                    document.getElementById('override-panel').classList.remove('show');
+                } else {
+                    setInterventionStatus(`⚠ ${data.message}`);
+                    setTimeout(() => setInterventionStatus(''), 3000);
+                }
+            } catch (e) {
+                setInterventionStatus('⚠ special instructions failed');
+                setTimeout(() => setInterventionStatus(''), 3000);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+        window.sendOverride = sendOverride;
+
+        // ── Auto-connect from ?id= query param ────────
+        // When arriving from /new-task (or a direct link), auto-join a run.
+        (function autoConnectFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const runId = params.get('id');
+            if (!runId || !/^[0-9a-f-]{36}$/i.test(runId)) return;
+
+            // Hide input, show pipeline section
+            inputSection.style.display = 'none';
+            pipelineSection.style.display = 'block';
+            promptDisplay.textContent = 'Loading run…';
+
+            // Mark as running so controls work
+            isRunning = true;
+            currentRunId = runId;
+            if (typeof window._copilotRunId !== 'undefined') window._copilotRunId = runId;
+            var copilotFab = document.getElementById('copilot-fab');
+            if (copilotFab) copilotFab.style.display = '';
+            // Activate View Full Trace stepper button for this run
+            var traceBtnStepperAC = document.getElementById('btn-view-trace-stepper');
+            if (traceBtnStepperAC) {
+                traceBtnStepperAC.href = `/dag?run=${runId}`;
+                traceBtnStepperAC.classList.remove('dimmed');
+            }
+
+            // Show intervention bar
+            var interventionBar = document.getElementById('intervention-bar');
+            if (interventionBar) interventionBar.style.display = 'flex';
+            var btnPause = document.getElementById('btn-pause');
+            if (btnPause) btnPause.style.display = '';
+            var btnResume = document.getElementById('btn-resume');
+            if (btnResume) btnResume.style.display = 'none';
+
+            setTerminalStatus('running', 'connecting…');
+
+            // Fetch run config to display the original prompt
+            fetch('/api/pipeline/' + runId + '/config').then(function(r) {
+                return r.json();
+            }).then(function(d) {
+                if (d.success) {
+                    // Attempt to extract prompt from config
+                    var cfg = d.config || {};
+                    promptDisplay.textContent = cfg.prompt || '';
+                }
+            }).catch(function() {});
+
+            connectStream(runId);
+
+            // Clean up the URL (remove ?id=) without navigating
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState({}, '', '/run');
+            }
+        })();
+    })();
+    </script>
+
+    <!-- Pipeline Copilot Panel -->
+    <button id="copilot-fab" class="copilot-fab" onclick="window.copilotToggle()" title="Ask about this build" style="display:none">
+        <span class="copilot-fab-icon">💬</span>
+        <span>Ask AI</span>
+    </button>
+
+    <div id="copilot-panel" class="copilot-panel" role="dialog" aria-label="Pipeline Copilot">
+        <div class="copilot-header">
+            <div>
+                <div class="copilot-header-title">Pipeline Copilot</div>
+                <div class="copilot-header-sub">Glass box — made conversational</div>
+            </div>
+            <button class="copilot-close-btn" onclick="window.copilotToggle()" aria-label="Close">✕</button>
+        </div>
+        <div class="copilot-messages" id="copilot-messages">
+            <div class="copilot-welcome" id="copilot-welcome">
+                <p>Ask me why the pipeline made any decision.</p>
+                <div class="copilot-chips" id="copilot-chips">
+                    <button onclick="window.copilotAsk('Why was this classified as static_surface or light_app?')">Why this classification?</button>
+                    <button onclick="window.copilotAsk('What did Intent Gate extract from my prompt?')">What did ISE extract?</button>
+                    <button onclick="window.copilotAsk('What are the final constraints applied to this run?')">Show constraints</button>
+                    <button onclick="window.copilotAsk('Were there any constraint violations?')">Any violations?</button>
+                    <button onclick="window.copilotAsk('What did VERIFY check and what were the results?')">VERIFY results?</button>
+                    <button onclick="window.copilotAsk('What subtasks did PLAN choose and why?')">What was planned?</button>
+                    <button onclick="window.copilotAsk('Did soft expansion activate? Why or why not?')">Soft expansion?</button>
+                    <button onclick="window.copilotAsk('What is the confidence level of this classification?')">Confidence score?</button>
+                </div>
+            </div>
+        </div>
+        <div class="copilot-input-area">
+            <input id="copilot-input" type="text" class="copilot-input"
+                placeholder="Why did you choose…"
+                onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); window.copilotSend(); }">
+            <button id="copilot-send-btn" class="copilot-send-btn" onclick="window.copilotSend()" aria-label="Send">→</button>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var isOpen = false;
+        var msgCount = 0;
+        var chipsHidden = false;
+        var isSending = false;
+
+        function getRunId() {
+            return window._copilotRunId || null;
+        }
+
+        function show() {
+            document.getElementById('copilot-fab').style.display = '';
+        }
+
+        // Called by main script when a run starts
+        window._copilotOnRunStart = function(runId) {
+            window._copilotRunId = runId;
+            show();
+        };
+
+        function toggle() {
+            isOpen = !isOpen;
+            var panel = document.getElementById('copilot-panel');
+            var fab = document.getElementById('copilot-fab');
+            panel.classList.toggle('open', isOpen);
+            fab.classList.toggle('active', isOpen);
+            if (isOpen) {
+                document.getElementById('copilot-input').focus();
+            }
+        }
+        window.copilotToggle = toggle;
+
+        function ask(question) {
+            document.getElementById('copilot-input').value = question;
+            send();
+        }
+        window.copilotAsk = ask;
+
+        function hideChips() {
+            if (!chipsHidden) {
+                var el = document.getElementById('copilot-chips');
+                if (el) el.style.display = 'none';
+                // also hide welcome para if messages have been added
+                chipsHidden = true;
+            }
+        }
+
+        function appendMsg(role, text, isLoading) {
+            var id = 'cmsg' + (++msgCount);
+            var el = document.createElement('div');
+            el.className = 'copilot-msg copilot-msg-' + role + (isLoading ? ' loading' : '');
+            el.id = id;
+            el.textContent = text;
+            var msgs = document.getElementById('copilot-messages');
+            msgs.appendChild(el);
+            msgs.scrollTop = msgs.scrollHeight;
+            return id;
+        }
+
+        function updateMsg(id, text) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.textContent = text;
+                el.classList.remove('loading');
+                document.getElementById('copilot-messages').scrollTop = 99999;
+            }
+        }
+
+        async function send() {
+            if (isSending) return;
+            var input = document.getElementById('copilot-input');
+            var question = input.value.trim();
+            if (!question) return;
+
+            var runId = getRunId();
+            if (!runId) {
+                appendMsg('system', 'Start a build first — then ask questions about it.');
+                input.value = '';
+                return;
+            }
+
+            hideChips();
+            appendMsg('user', question);
+            input.value = '';
+
+            isSending = true;
+            var btn = document.getElementById('copilot-send-btn');
+            if (btn) btn.disabled = true;
+
+            var loadingId = appendMsg('assistant', 'Thinking…', true);
+
+            try {
+                var res = await fetch('/api/pipeline/' + runId + '/copilot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question })
+                });
+                var data = await res.json();
+                updateMsg(loadingId, data.success ? data.answer : ('Error: ' + (data.message || 'Unknown error')));
+            } catch (e) {
+                updateMsg(loadingId, 'Failed to reach the copilot. Check your connection and try again.');
+            } finally {
+                isSending = false;
+                if (btn) btn.disabled = false;
+            }
+        }
+        window.copilotSend = send;
+    })();
+    </script>
+
+    <!-- Polsia Analytics -->
+    <script>
+    (function() {
+        var slug = 'buildorbit';
+        if (!slug) return;
+        var vid = localStorage.getItem('polsia_vid');
+        if (!vid) {
+            vid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+            localStorage.setItem('polsia_vid', vid);
+        }
+        new Image().src = 'https://polsia.com/api/beacon/pixel?s=' + encodeURIComponent(slug) + '&v=' + encodeURIComponent(vid);
+    })();
+    </script>
+    <script src="/sidebar.js"></script>
+</body>
+</html>

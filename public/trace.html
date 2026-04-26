@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Build History — BuildOrbit</title>
+  <link rel="stylesheet" href="/css/buildorbit.css?v=20260426e">
+</head>
+<body class="page-trace">
+
+<!-- Nav -->
+<nav>
+  <div class="nav-left">
+    <a class="logo" href="/dashboard">
+      <div class="logo-dot"></div>
+      BuildOrbit
+    </a>
+    <span class="nav-sep">›</span>
+    <span class="nav-title" id="nav-title">Build History</span>
+  </div>
+  <div class="nav-right">
+    <a id="btn-run" class="btn-sm" href="#" style="display:none">
+      ↗ View build
+    </a>
+    <a class="btn-sm" href="/dashboard">← Dashboard</a>
+  </div>
+</nav>
+
+<!-- Loading -->
+<div id="loading" style="display:none">
+  <div class="spinner"></div>
+  <span>Loading build history…</span>
+</div>
+
+<!-- Run picker (no runId in URL) -->
+<div id="run-picker" style="display:none">
+  <h1>Build History</h1>
+  <p>Select a build to see what happened step by step.</p>
+  <!-- Intent class filter bar -->
+  <div id="intent-filter-bar">
+    <button class="intent-filter-btn active" data-filter="all" onclick="setIntentFilter('all', this)">All</button>
+    <button class="intent-filter-btn" data-filter="STATIC_SURFACE" onclick="setIntentFilter('STATIC_SURFACE', this)">🌐 Landing Pages</button>
+    <button class="intent-filter-btn" data-filter="INTERACTIVE_LIGHT_APP" onclick="setIntentFilter('INTERACTIVE_LIGHT_APP', this)">⚡ Light Apps</button>
+    <button class="intent-filter-btn" data-filter="PRODUCT_SYSTEM" onclick="setIntentFilter('PRODUCT_SYSTEM', this)">🏗 Full Stack</button>
+  </div>
+  <div class="run-list" id="run-list">
+    <div>Loading recent runs…</div>
+  </div>
+</div>
+
+<!-- Main trace view -->
+<div id="trace-view" style="display:none">
+
+  <!-- Left: timeline sidebar -->
+  <div class="timeline-sidebar">
+    <div class="sidebar-header">
+      <h2>What happened and why</h2>
+      <div class="run-info">
+        <div class="run-prompt mono" id="sidebar-prompt">…</div>
+        <div class="run-stats">
+          <div><strong id="stat-stages">0</strong> steps</div>
+          <div><strong id="stat-time">–</strong> ms</div>
+          <div><strong id="stat-cost">$0.00</strong></div>
+        </div>
+      </div>
+      <div class="timeline-tabs">
+        <button class="tab active" onclick="setTab('trace')" id="tab-trace">Trace</button>
+        <button class="tab" onclick="setTab('diffs')" id="tab-diffs">Diffs</button>
+      </div>
+    </div>
+
+    <div class="timeline-scroll">
+      <div class="timeline" id="timeline">
+        <div>No trace data yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: detail panel -->
+  <div class="detail-panel" id="detail-panel">
+    <div class="detail-empty" id="detail-empty">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+      <p>Click a step in the timeline<br>to see what happened.</p>
+    </div>
+    <div id="detail-content" style="display:none"></div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────
+let currentRunId = null;
+let traceData = null;
+let diffsData = null;
+let activeStepIndex = null;
+let activeTab = 'trace';
+// History filtering state
+let _allRuns = [];
+let _activeIntentFilter = 'all';
+
+const AGENT_COLORS = {
+  PlannerAgent: 'rgba(20, 184, 166, 0.6)',
+  BuilderAgent: '#22c55e',
+  QAAgent:      '#f59e0b',
+  OpsAgent:     '#a855f7',
+  Unknown:      '#888',
+};
+
+const AGENT_DISPLAY_NAMES = {
+  PlannerAgent: 'Planning',
+  BuilderAgent: 'Building',
+  QAAgent:      'Quality check',
+  OpsAgent:     'Operations',
+};
+
+const STAGE_LABELS = {
+  plan:     'Understanding your request',
+  scaffold: 'Setting up structure',
+  code:     'Building your product',
+  save:     'Storing your work',
+  verify:   'Checking everything works',
+};
+
+// ── Init ───────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  const params = new URLSearchParams(location.search);
+  const runId = params.get('run');
+
+  if (runId) {
+    currentRunId = runId;
+    await loadTrace(runId);
+  } else {
+    await showRunPicker();
+  }
+});
+
+// ── Intent display helpers ──────────────────────────────────
+const INTENT_DISPLAY = {
+  STATIC_SURFACE:        '🌐 Landing Page',
+  INTERACTIVE_LIGHT_APP: '⚡ Light App',
+  PRODUCT_SYSTEM:        '🏗 Full Stack',
+  // Legacy internal names
+  static_surface:  '🌐 Landing Page',
+  light_app:       '⚡ Light App',
+  full_product:    '🏗 Full Stack',
+  soft_expansion:  '⚡ Light App',
+};
+
+function getIntentBadgeHtml(run) {
+  const ic = run.intent_class || run.constraintSummary?.intentClass || null;
+  if (!ic) return '';
+  const label = INTENT_DISPLAY[ic] || ic;
+  return `<span style="font-family:'DM Mono',monospace;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;padding:0.15rem 0.45rem;border-radius:3px;background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent-border)">${label}</span>`;
+}
+
+// ── Intent filter ───────────────────────────────────────────
+function setIntentFilter(filter, btnEl) {
+  _activeIntentFilter = filter;
+  document.querySelectorAll('.intent-filter-btn').forEach(b => {
+    const isActive = b.dataset.filter === filter;
+    b.style.background  = isActive ? 'var(--accent-dim)' : 'transparent';
+    b.style.color       = isActive ? 'var(--accent)' : 'var(--text-muted)';
+    b.style.borderColor = isActive ? 'var(--accent-border)' : 'var(--border)';
+  });
+  renderRunList();
+}
+
+function renderRunList() {
+  const list = document.getElementById('run-list');
+  if (!list) return;
+
+  const filtered = _activeIntentFilter === 'all'
+    ? _allRuns
+    : _allRuns.filter(r => {
+        const ic = r.intent_class || r.constraintSummary?.intentClass || null;
+        return ic === _activeIntentFilter;
+      });
+
+  if (!filtered.length) {
+    const msg = _activeIntentFilter === 'all'
+      ? 'No builds found.'
+      : `No ${INTENT_DISPLAY[_activeIntentFilter] || _activeIntentFilter} builds found.`;
+    list.innerHTML = `<div style="color:var(--text-dim);font-size:0.85rem;padding:1rem 0">${msg}</div>`;
+    return;
+  }
+
+  const statusLabels = { completed:'Completed ✓', failed:'Failed', running:'Building...', in_progress:'Building...', paused:'Paused' };
+  list.innerHTML = filtered.map(r => `
+    <a class="run-item" href="/trace?run=${r.id}">
+      <div class="run-item-prompt">${escHtml(r.prompt || '(no prompt)')}</div>
+      <div class="run-item-meta">
+        ${getIntentBadgeHtml(r)}
+        <span class="badge badge-${r.status || 'pending'}">${statusLabels[r.status] || r.status || 'Waiting'}</span>
+        <span>${timeAgo(r.created_at)}</span>
+      </div>
+    </a>
+  `).join('');
+}
+
+// ── Run picker ─────────────────────────────────────────────
+async function showRunPicker() {
+  show('run-picker');
+  try {
+    const res = await fetch('/api/pipeline');
+    const data = await res.json();
+    const list = document.getElementById('run-list');
+    if (!data.success || !data.runs?.length) {
+      list.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem;padding:1rem 0">No builds found.</div>';
+      // Hide the filter bar if no runs exist
+      const filterBar = document.getElementById('intent-filter-bar');
+      if (filterBar) filterBar.style.display = 'none';
+      return;
+    }
+    _allRuns = data.runs;
+    renderRunList();
+  } catch (e) {
+    document.getElementById('run-list').innerHTML =
+      `<div style="color:var(--error);font-size:0.85rem">${e.message}</div>`;
+  }
+}
+
+// ── Load trace ─────────────────────────────────────────────
+async function loadTrace(runId) {
+  show('loading');
+
+  try {
+    const [traceRes, diffsRes] = await Promise.all([
+      fetch(`/api/pipeline/${runId}/trace`),
+      fetch(`/api/pipeline/${runId}/diffs`),
+    ]);
+
+    const trace = await traceRes.json();
+    const diffs = await diffsRes.json();
+
+    if (!trace.success) throw new Error(trace.message || 'Failed to load build history');
+
+    traceData = trace;
+    diffsData = diffs.success ? diffs : null;
+
+    hide('loading');
+    renderView(runId, trace, diffs);
+
+  } catch (e) {
+    hide('loading');
+    show('run-picker');
+    document.getElementById('run-list').innerHTML =
+      `<div style="color:var(--error);font-size:0.85rem;padding:1rem 0">Couldn't load build history: ${e.message}</div>`;
+  }
+}
+
+// ── Render main view ───────────────────────────────────────
+function renderView(runId, trace, diffs) {
+  show('trace-view');
+
+  // Nav
+  const shortId = runId.slice(0, 8);
+  document.getElementById('nav-title').textContent = `Build #${shortId}…`;
+  const btnRun = document.getElementById('btn-run');
+  btnRun.href = `/run?id=${runId}`;
+  btnRun.style.display = 'inline-flex';
+
+  // Sidebar run info
+  document.getElementById('sidebar-prompt').textContent = trace.run?.prompt || runId;
+  document.getElementById('stat-stages').textContent = trace.stageCount || 0;
+  document.getElementById('stat-time').textContent =
+    trace.totalLatencyMs ? fmt(trace.totalLatencyMs) : '–';
+  document.getElementById('stat-cost').textContent =
+    trace.totalCostUsd ? `$${trace.totalCostUsd.toFixed(5)}` : '$0.00';
+
+  renderTimeline(trace.steps || []);
+}
+
+// ── Timeline ───────────────────────────────────────────────
+function renderTimeline(steps) {
+  const tl = document.getElementById('timeline');
+  if (!steps.length) {
+    tl.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:0.75rem">No history yet.<br><small>Run a build to see what happened.</small></div>';
+    return;
+  }
+
+  tl.innerHTML = steps.map((step, i) => {
+    const color = AGENT_COLORS[step.agentName] || '#888';
+    const label = STAGE_LABELS[step.stage] || step.stage;
+    const displayName = AGENT_DISPLAY_NAMES[step.agentName] || step.agentName || 'Unknown';
+    const initials = step.agentName ? step.agentName.slice(0, 2).toUpperCase() : '??';
+
+    const latencyChip = step.latencyMs
+      ? `<span class="meta-chip chip-latency">${fmt(step.latencyMs)}</span>` : '';
+    const costChip = step.tokenCost?.costUsd
+      ? `<span class="meta-chip chip-cost">$${step.tokenCost.costUsd.toFixed(5)}</span>` : '';
+    const tokenChip = step.tokenCost?.inputTokens
+      ? `<span class="meta-chip chip-tokens">${((step.tokenCost.inputTokens||0)+(step.tokenCost.outputTokens||0)).toLocaleString()} tok</span>` : '';
+
+    return `
+      <div class="timeline-step" id="step-${i}" onclick="selectStep(${i})">
+        <div class="step-dot" style="color:${color};border-color:${color};background:${color}18">
+          ${initials}
+        </div>
+        <div class="step-body">
+          <div class="step-agent" style="color:${color}">${displayName}</div>
+          <div class="step-stage">${label}</div>
+          <div class="step-meta">${latencyChip}${costChip}${tokenChip}</div>
+          ${step.outputSummary ? `<div class="step-summary">${escHtml(step.outputSummary)}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Diffs timeline ─────────────────────────────────────────
+function renderDiffsTimeline(diffs) {
+  if (!diffs || !diffs.length) {
+    document.getElementById('timeline').innerHTML =
+      '<div style="color:var(--text-dim);font-size:0.8rem;padding:0.75rem">No diffs available.</div>';
+    return;
+  }
+
+  const tl = document.getElementById('timeline');
+  tl.innerHTML = diffs.map((d, i) => {
+    const color = d.agentColor || '#888';
+    const label = STAGE_LABELS[d.stage] || d.stage;
+    const diffDisplayName = AGENT_DISPLAY_NAMES[d.agentName] || d.agentName || 'Unknown';
+    const initials = d.agentName ? d.agentName.slice(0, 2).toUpperCase() : '??';
+    const changeCount = d.diff?.changes?.length || 0;
+
+    return `
+      <div class="timeline-step" id="diff-${i}" onclick="selectDiff(${i})">
+        <div class="step-dot" style="color:${color};border-color:${color};background:${color}18">
+          ${initials}
+        </div>
+        <div class="step-body">
+          <div class="step-agent" style="color:${color}">${diffDisplayName}</div>
+          <div class="step-stage">${label}</div>
+          <div class="step-meta">
+            <span class="meta-chip chip-latency">${changeCount} changes</span>
+            ${d.latencyMs ? `<span class="meta-chip chip-latency">${fmt(d.latencyMs)}</span>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Tab switching ──────────────────────────────────────────
+function setTab(tab) {
+  activeTab = tab;
+  document.getElementById('tab-trace').classList.toggle('active', tab === 'trace');
+  document.getElementById('tab-diffs').classList.toggle('active', tab === 'diffs');
+
+  clearDetail();
+
+  if (tab === 'trace') {
+    renderTimeline(traceData?.steps || []);
+  } else {
+    renderDiffsTimeline(diffsData?.diffs || []);
+  }
+}
+
+// ── Select a trace step ────────────────────────────────────
+function selectStep(idx) {
+  // Deactivate previous
+  document.querySelectorAll('.timeline-step').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById(`step-${idx}`);
+  if (el) el.classList.add('active');
+
+  const step = traceData?.steps?.[idx];
+  if (!step) return;
+
+  activeStepIndex = idx;
+  renderStepDetail(step);
+}
+
+function renderStepDetail(step) {
+  hide('detail-empty');
+  show('detail-content');
+
+  const color = AGENT_COLORS[step.agentName] || '#888';
+  const label = STAGE_LABELS[step.stage] || step.stage;
+  const agentDisplayName = AGENT_DISPLAY_NAMES[step.agentName] || step.agentName || 'Unknown';
+
+  const latency = step.latencyMs ? fmt(step.latencyMs) : null;
+  const cost = step.tokenCost?.costUsd ? `$${step.tokenCost.costUsd.toFixed(5)}` : null;
+  const model = step.tokenCost?.model || null;
+  const totalTokens = step.tokenCost
+    ? (step.tokenCost.inputTokens||0) + (step.tokenCost.outputTokens||0) : null;
+
+  const detail = document.getElementById('detail-content');
+
+  detail.innerHTML = `
+    <!-- Header -->
+    <div class="detail-header">
+      <div class="detail-header-left">
+        <div class="agent-badge" style="color:${color};border-color:${color};background:${color}18">
+          ${agentDisplayName}
+        </div>
+        <div class="detail-stage-name">${label}</div>
+      </div>
+      <div class="detail-badges">
+        ${latency ? `<span class="meta-chip chip-latency" style="font-size:0.8rem;padding:0.2rem 0.6rem">${latency}</span>` : ''}
+        ${cost    ? `<span class="meta-chip chip-cost"    style="font-size:0.8rem;padding:0.2rem 0.6rem">${cost}</span>` : ''}
+        ${model   ? `<span class="meta-chip chip-tokens"  style="font-size:0.8rem;padding:0.2rem 0.6rem">${model}</span>` : ''}
+      </div>
+    </div>
+
+    <!-- Token stats -->
+    ${step.tokenCost ? `
+    <div class="summary-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="summary-card">
+        <div class="summary-card-label">Input Tokens</div>
+        <div class="summary-card-value" style="font-size:1rem">${(step.tokenCost.inputTokens||0).toLocaleString()}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-card-label">Output Tokens</div>
+        <div class="summary-card-value" style="font-size:1rem">${(step.tokenCost.outputTokens||0).toLocaleString()}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-card-label">Total Cost</div>
+        <div class="summary-card-value" style="font-size:1rem;color:#4ade80">$${(step.tokenCost.costUsd||0).toFixed(6)}</div>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Prompt sent -->
+    ${step.promptSent ? `
+    <div class="section open" id="sect-prompt">
+      <div class="section-header" onclick="toggleSection('sect-prompt')">
+        <div class="section-title">
+          <div class="section-icon" style="background:${color}20;color:${color}">→</div>
+          Prompt Sent
+        </div>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="section-body">
+        <div class="code-block">${escHtml(step.promptSent)}</div>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Reasoning / streamed output -->
+    ${step.reasoning ? `
+    <div class="section open" id="sect-reasoning">
+      <div class="section-header" onclick="toggleSection('sect-reasoning')">
+        <div class="section-title">
+          <div class="section-icon" style="background:${color}20;color:${color}">⟳</div>
+          Reasoning / Streamed Output
+        </div>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="section-body">
+        <div class="code-block">${escHtml(step.reasoning)}</div>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Output -->
+    ${step.outputPayload ? renderOutputSection(step.stage, step.outputPayload, color) : ''}
+
+    <!-- Raw output JSON -->
+    ${step.outputPayload ? `
+    <div class="section" id="sect-json">
+      <div class="section-header" onclick="toggleSection('sect-json')">
+        <div class="section-title">
+          <div class="section-icon" style="background:rgba(165,180,252,0.1);color:#a5b4fc">{}</div>
+          Raw Output (JSON)
+        </div>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="section-body">
+        <div class="json-view">${escHtml(JSON.stringify(step.outputPayload, null, 2))}</div>
+      </div>
+    </div>
+    ` : ''}
+  `;
+}
+
+// ── Stage-specific output renderer ────────────────────────
+function renderOutputSection(stage, payload, color) {
+  if (!payload) return '';
+
+  let body = '';
+
+  if (stage === 'plan') {
+    const tasks = payload.subtasks || [];
+    body = `
+      <div class="diff-list">
+        <div class="diff-item info">
+          <span class="diff-icon">📊</span>
+          <span class="diff-label">Complexity</span>
+          <span class="diff-value">${escHtml(payload.estimatedComplexity || '?')}</span>
+        </div>
+        ${tasks.map(t => `
+          <div class="diff-item added">
+            <span class="diff-icon">✓</span>
+            <span class="diff-label">#${t.id} ${escHtml(t.title)}</span>
+            <span class="diff-value">${escHtml(t.description || '')} <em style="color:var(--text-dim)">${t.estimatedHours}h</em></span>
+          </div>
+        `).join('')}
+        ${payload.rawMarkdown ? `
+          <div class="diff-item info" style="flex-direction:column;gap:0.4rem">
+            <div style="font-weight:600;color:var(--text-muted);font-size:0.75rem">Markdown Plan</div>
+            <div class="code-block" style="max-height:200px;background:transparent;padding:0;font-size:0.75rem">${escHtml(payload.rawMarkdown)}</div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  } else if (stage === 'scaffold') {
+    const files = (payload.tree || []).filter(t => t.type === 'file');
+    const dirs  = (payload.tree || []).filter(t => t.type === 'dir');
+    body = `
+      <div class="diff-list">
+        <div class="diff-item info">
+          <span class="diff-icon">🛠</span>
+          <span class="diff-label">Stack</span>
+          <span class="diff-value">${escHtml((payload.techStack||[]).join(', '))}</span>
+        </div>
+        ${dirs.map(d => `
+          <div class="diff-item info">
+            <span class="diff-icon">📁</span>
+            <span class="diff-label">Dir</span>
+            <span class="diff-value mono">${escHtml(d.path)}</span>
+          </div>
+        `).join('')}
+        ${files.map(f => `
+          <div class="diff-item added">
+            <span class="diff-icon">📄</span>
+            <span class="diff-label mono">${escHtml(f.path)}</span>
+            <span class="diff-value">${escHtml(f.description||'')}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } else if (stage === 'code') {
+    const files = Object.entries(payload.files || {});
+    if (!files.length) {
+      body = '<div class="diff-list"><div class="diff-item warning"><span>No files generated</span></div></div>';
+    } else {
+      const tabIds = files.map((_, i) => `file-${i}`);
+      body = `
+        <div class="file-tabs" id="file-tabs">
+          ${files.map(([name], i) => `
+            <div class="file-tab ${i===0?'active':''}" onclick="selectFile(${i})">${escHtml(name)}</div>
+          `).join('')}
+        </div>
+        ${files.map(([name, code], i) => `
+          <div class="file-content ${i===0?'active':''}" id="file-${i}">
+            <div class="code-block" style="max-height:450px">${escHtml(typeof code === 'string' ? code : JSON.stringify(code, null, 2))}</div>
+          </div>
+        `).join('')}
+      `;
+    }
+  } else if (stage === 'verify') {
+    const checks = payload.checks || [];
+    body = `
+      <div class="diff-list">
+        ${checks.map(c => `
+          <div class="diff-item ${c.passed ? 'passed' : 'failed'}">
+            <span class="diff-icon">${c.passed ? '✓' : '✗'}</span>
+            <span class="diff-value">${escHtml(c.name)}</span>
+          </div>
+        `).join('')}
+        ${(payload.errors||[]).map(e => `
+          <div class="diff-item error">
+            <span class="diff-icon">✗</span>
+            <span class="diff-label">Error</span>
+            <span class="diff-value">${escHtml(e)}</span>
+          </div>
+        `).join('')}
+        ${(payload.warnings||[]).map(w => `
+          <div class="diff-item warning">
+            <span class="diff-icon">⚠</span>
+            <span class="diff-label">Warning</span>
+            <span class="diff-value">${escHtml(w)}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } else if (stage === 'save') {
+    body = `
+      <div class="diff-list">
+        <div class="diff-item ${payload.persisted ? 'passed' : 'failed'}">
+          <span class="diff-icon">${payload.persisted ? '✓' : '✗'}</span>
+          <span class="diff-label">Persisted</span>
+          <span class="diff-value">${payload.persisted ? 'Yes' : 'No'}</span>
+        </div>
+        <div class="diff-item info">
+          <span class="diff-icon">🔖</span>
+          <span class="diff-label">Version</span>
+          <span class="diff-value mono">${escHtml(payload.versionId||'unknown')}</span>
+        </div>
+        <div class="diff-item info">
+          <span class="diff-icon">🕐</span>
+          <span class="diff-label">Timestamp</span>
+          <span class="diff-value">${escHtml(payload.timestamp||'')}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!body) return '';
+
+  return `
+    <div class="section open" id="sect-output">
+      <div class="section-header" onclick="toggleSection('sect-output')">
+        <div class="section-title">
+          <div class="section-icon" style="background:${color}20;color:${color}">◈</div>
+          Output
+        </div>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="section-body">${body}</div>
+    </div>
+  `;
+}
+
+// ── Diff detail ────────────────────────────────────────────
+function selectDiff(idx) {
+  document.querySelectorAll('.timeline-step').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById(`diff-${idx}`);
+  if (el) el.classList.add('active');
+
+  const diff = diffsData?.diffs?.[idx];
+  if (!diff) return;
+
+  hide('detail-empty');
+  show('detail-content');
+
+  const color = diff.agentColor || '#888';
+  const label = STAGE_LABELS[diff.stage] || diff.stage;
+  const changes = diff.diff?.changes || [];
+
+  const detail = document.getElementById('detail-content');
+  detail.innerHTML = `
+    <div class="detail-header">
+      <div class="detail-header-left">
+        <div class="agent-badge" style="color:${color};border-color:${color};background:${color}18">
+          ${diff.agentName || 'Unknown'}
+        </div>
+        <div class="detail-stage-name">${label} — Diff</div>
+      </div>
+      <div class="detail-badges">
+        ${diff.latencyMs ? `<span class="meta-chip chip-latency" style="font-size:0.8rem;padding:0.2rem 0.6rem">${fmt(diff.latencyMs)}</span>` : ''}
+      </div>
+    </div>
+
+    <div class="section open" id="sect-changes">
+      <div class="section-header" onclick="toggleSection('sect-changes')">
+        <div class="section-title">
+          <div class="section-icon" style="background:${color}20;color:${color}">±</div>
+          Changes (${changes.length})
+        </div>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="section-body">
+        <div class="diff-list">
+          ${changes.length === 0
+            ? '<div class="diff-item info"><span>No changes recorded</span></div>'
+            : changes.map(c => `
+              <div class="diff-item ${c.type || 'info'}">
+                <span class="diff-icon">${diffIcon(c.type)}</span>
+                <span class="diff-label">${escHtml(c.label||'')}</span>
+                <span class="diff-value">${escHtml(c.value||'')}</span>
+              </div>
+            `).join('')
+          }
+        </div>
+      </div>
+    </div>
+
+    ${diff.after ? `
+    <div class="section" id="sect-after">
+      <div class="section-header" onclick="toggleSection('sect-after')">
+        <div class="section-title">
+          <div class="section-icon" style="background:rgba(165,180,252,0.1);color:#a5b4fc">{}</div>
+          After (JSON)
+        </div>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="section-body">
+        <div class="json-view">${escHtml(JSON.stringify(diff.after, null, 2))}</div>
+      </div>
+    </div>
+    ` : ''}
+  `;
+}
+
+// ── Helpers ────────────────────────────────────────────────
+function toggleSection(id) {
+  document.getElementById(id)?.classList.toggle('open');
+}
+
+function clearDetail() {
+  show('detail-empty');
+  hide('detail-content');
+  activeStepIndex = null;
+}
+
+function selectFile(idx) {
+  document.querySelectorAll('.file-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+  document.querySelectorAll('.file-content').forEach((c, i) => c.classList.toggle('active', i === idx));
+}
+
+function show(id) { const el = document.getElementById(id); if (el) el.style.display = ''; }
+function hide(id) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+
+function escHtml(s) {
+  if (typeof s !== 'string') s = String(s || '');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmt(ms) {
+  if (!ms) return '–';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms/1000).toFixed(1)}s`;
+}
+
+function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - new Date(ts).getTime();
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d}d ago`;
+  if (h > 0) return `${h}h ago`;
+  if (m > 0) return `${m}m ago`;
+  return 'just now';
+}
+
+function diffIcon(type) {
+  switch (type) {
+    case 'added':   return '+';
+    case 'passed':  return '✓';
+    case 'failed':  return '✗';
+    case 'warning': return '⚠';
+    case 'error':   return '✗';
+    default:        return '·';
+  }
+}
+</script>
+<script src="/sidebar.js"></script>
+</body>
+</html>

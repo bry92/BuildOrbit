@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decision Trace — BuildOrbit</title>
+  <link rel="stylesheet" href="/css/buildorbit.css?v=20260426e">
+</head>
+<body class="page-dag">
+
+<!-- Nav -->
+<nav>
+  <div class="nav-left">
+    <a class="logo" href="/dashboard">
+      <div class="logo-dot"></div>
+      BuildOrbit
+    </a>
+    <span class="nav-sep">›</span>
+    <span class="nav-title" id="nav-title">Decision Trace</span>
+  </div>
+  <div class="nav-right">
+    <a id="btn-history" class="btn-sm" href="/trace">↖ History</a>
+    <a id="btn-run" class="btn-sm" href="/run" style="display:none">↗ View Build</a>
+    <a class="btn-sm" href="/dashboard">← Dashboard</a>
+  </div>
+</nav>
+
+<!-- Loading state -->
+<div id="loading">
+  <div class="spinner"></div>
+  <span>Loading decision trace…</span>
+</div>
+
+<!-- Error state -->
+<div id="error-state" style="display:none">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+  </svg>
+  <p id="error-msg">Failed to load trace data.</p>
+</div>
+
+<!-- Main DAG view -->
+<div id="dag-view" style="display:none">
+
+  <!-- Non-explainable warning -->
+  <div id="warning-banner">
+    <strong>⚠️ Trace integrity check failed</strong>
+    Some decisions in this run may not be fully traceable. The causal chain shown below may be incomplete.
+  </div>
+
+  <!-- Run summary -->
+  <div class="run-summary">
+    <div class="run-summary-title">
+      Decision Trace
+      <span class="run-id-chip mono" id="run-id-chip">…</span>
+    </div>
+    <div class="run-summary-prompt" id="run-prompt"></div>
+    <div class="run-summary-meta">
+      <span><strong id="stat-nodes">0</strong> decisions</span>
+      <span><strong id="stat-phases">0</strong> phases</span>
+    </div>
+  </div>
+
+  <!-- DAG Nodes -->
+  <div id="dag-container">
+    <div class="empty-dag">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+      <p>No decision nodes recorded for this run.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Phase config ─────────────────────────────────────────
+const PHASE_ORDER = ['INTENT_GATE', 'PLAN', 'SCAFFOLD', 'CODE', 'SAVE', 'VERIFY'];
+
+const PHASE_NAMES = {
+  INTENT_GATE: 'Intent Gate',
+  PLAN:        'Plan',
+  SCAFFOLD:    'Scaffold',
+  CODE:        'Code',
+  SAVE:        'Save',
+  VERIFY:      'Verify',
+};
+
+const PHASE_COLORS = {
+  INTENT_GATE: '#a855f7',
+  PLAN:        'rgba(20, 184, 166, 0.6)',
+  SCAFFOLD:    '#22c55e',
+  CODE:        '#f97316',
+  SAVE:        '#a1a1aa',
+  VERIFY:      '#14b8a6',
+};
+
+const DECISION_NAMES = {
+  intent_classification:           'Intent Classification',
+  constraint_contract_generation:  'Constraint Contract',
+  complexity_budget_assignment:    'Complexity Budget',
+  scope_decision:                  'Scope Decision',
+  soft_expansion_decision:         'Soft Expansion',
+  framework_selection:             'Framework Selection',
+  file_structure:                  'File Structure',
+  implementation_strategy:         'Implementation Strategy',
+  verification_result:             'Verification Result',
+};
+
+function formatDecisionType(dt) {
+  if (!dt) return 'Unknown';
+  if (dt.startsWith('verify_')) {
+    const name = dt.slice(7).replace(/_/g, ' ');
+    return 'Check: ' + name.charAt(0).toUpperCase() + name.slice(1);
+  }
+  return DECISION_NAMES[dt] || dt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function phaseColor(phase) {
+  return PHASE_COLORS[phase] || '#888888';
+}
+
+function phaseName(phase) {
+  return PHASE_NAMES[phase] || phase;
+}
+
+function escHtml(s) {
+  if (typeof s !== 'string') s = String(s || '');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ─────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  const params = new URLSearchParams(location.search);
+  const runId  = params.get('run');
+
+  if (!runId) {
+    showError('No run ID specified. Add ?run=<run-id> to the URL.');
+    return;
+  }
+
+  // Update nav run link
+  const btnRun = document.getElementById('btn-run');
+  if (btnRun) {
+    btnRun.href = `/run?id=${runId}`;
+    btnRun.style.display = 'inline-flex';
+  }
+
+  try {
+    const res  = await fetch(`/api/runs/${runId}/trace`);
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.message || 'API returned failure');
+    }
+
+    hide('loading');
+    renderDAG(data);
+
+  } catch (err) {
+    showError(`Couldn't load trace: ${err.message}`);
+  }
+});
+
+// ── Render DAG ───────────────────────────────────────────
+function renderDAG(data) {
+  const { run, nodes = [], nonExplainable } = data;
+
+  // Update nav title
+  const shortId = run?.id?.slice(0, 8) || '?';
+  document.getElementById('nav-title').textContent = `Decision Trace #${shortId}…`;
+
+  // Update run summary
+  document.getElementById('run-id-chip').textContent = shortId + '…';
+  if (run?.prompt) {
+    document.getElementById('run-prompt').textContent = `"${run.prompt}"`;
+  }
+
+  // Non-explainable warning
+  if (nonExplainable || run?.non_explainable) {
+    document.getElementById('warning-banner').style.display = 'block';
+  }
+
+  // Show main view
+  show('dag-view');
+
+  if (!nodes.length) {
+    // Empty state already in HTML
+    document.getElementById('stat-nodes').textContent = '0';
+    document.getElementById('stat-phases').textContent = '0';
+    return;
+  }
+
+  // Group nodes by phase, preserving order
+  const phaseMap = new Map();
+  for (const node of nodes) {
+    const ph = node.phase || 'UNKNOWN';
+    if (!phaseMap.has(ph)) phaseMap.set(ph, []);
+    phaseMap.get(ph).push(node);
+  }
+
+  // Sort phases by canonical order (unknown phases go last)
+  const orderedPhases = [
+    ...PHASE_ORDER.filter(p => phaseMap.has(p)),
+    ...[...phaseMap.keys()].filter(p => !PHASE_ORDER.includes(p)),
+  ];
+
+  // Update stats
+  document.getElementById('stat-nodes').textContent  = nodes.length;
+  document.getElementById('stat-phases').textContent = orderedPhases.length;
+
+  // Render
+  const container = document.getElementById('dag-container');
+  container.innerHTML = '';
+
+  orderedPhases.forEach((phase, phaseIdx) => {
+    const phNodes = phaseMap.get(phase);
+    const color   = phaseColor(phase);
+
+    // Phase group wrapper
+    const group = document.createElement('div');
+    group.className = 'phase-group';
+    group.id = `phase-${phase}`;
+
+    // Phase header
+    const header = document.createElement('div');
+    header.className = 'phase-header';
+    header.setAttribute('role', 'button');
+    header.setAttribute('aria-expanded', 'true');
+    header.innerHTML = `
+      <div class="phase-header-left">
+        <div class="phase-dot" style="background:${color};box-shadow:0 0 6px ${color}44"></div>
+        <span class="phase-name" style="color:${color}">${escHtml(phaseName(phase))}</span>
+        <span class="phase-count">${phNodes.length} decision${phNodes.length !== 1 ? 's' : ''}</span>
+      </div>
+      <span class="phase-toggle" aria-hidden="true">▾</span>
+    `;
+    header.addEventListener('click', () => togglePhase(group));
+    group.appendChild(header);
+
+    // Phase body (nodes)
+    const body = document.createElement('div');
+    body.className = 'phase-body';
+
+    phNodes.forEach((node, nodeIdx) => {
+      const nodeEl = renderNodeCard(node, color, nodeIdx === phNodes.length - 1);
+      body.appendChild(nodeEl);
+    });
+
+    group.appendChild(body);
+    container.appendChild(group);
+
+    // Inter-phase connector (between phases, not after last)
+    if (phaseIdx < orderedPhases.length - 1) {
+      const connector = document.createElement('div');
+      connector.className = 'phase-connector';
+      connector.setAttribute('aria-hidden', 'true');
+      connector.innerHTML = `
+        <div class="phase-connector-line"></div>
+        <div class="phase-connector-arrow"></div>
+      `;
+      container.appendChild(connector);
+    }
+  });
+}
+
+// ── Render a single node card ─────────────────────────────
+let nodeCounter = 0;
+
+function renderNodeCard(node, phaseColor, isLastInPhase) {
+  const {
+    phase, decisionType, chosen,
+    alternatives = [], rejectionReasons = [], constraintRefs = [],
+    isTerminal,
+  } = node;
+
+  const nodeId    = `node-${++nodeCounter}`;
+  const altSectId = `alt-${nodeCounter}`;
+  const dtLabel   = formatDecisionType(decisionType);
+  const color     = phaseColor;
+  const hasAlts   = alternatives.length > 0 || rejectionReasons.length > 0;
+  const hasConsts = constraintRefs.length > 0;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'node-wrapper';
+
+  // Build constraint chips HTML
+  const constHtml = hasConsts ? `
+    <div class="node-constraints">
+      <div class="constraints-label">Constraint refs</div>
+      <div class="constraint-chips">
+        ${constraintRefs.map(r => `<span class="constraint-chip">${escHtml(r)}</span>`).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  // Build alternatives HTML
+  let altsBodyHtml = '';
+  if (hasAlts) {
+    if (alternatives.length > 0) {
+      altsBodyHtml = alternatives.map((alt, i) => {
+        const reason = rejectionReasons[i] || rejectionReasons[0] || '';
+        return `
+          <div class="alternative-item">
+            <span class="alt-icon">↪</span>
+            <div class="alt-content">
+              <div class="alt-value">${escHtml(alt)}</div>
+              ${reason ? `<div class="alt-rejection">Rejected: ${escHtml(reason)}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else if (rejectionReasons.length > 0) {
+      // Only rejection reasons, no explicit alternatives
+      altsBodyHtml = rejectionReasons.map(r => `
+        <div class="alternative-item">
+          <span class="alt-icon">✕</span>
+          <div class="alt-content">
+            <div class="alt-rejection">${escHtml(r)}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+  } else {
+    altsBodyHtml = `<p class="no-alternatives">No alternatives considered</p>`;
+  }
+
+  const altCountLabel = alternatives.length > 0
+    ? `${alternatives.length} alternative${alternatives.length !== 1 ? 's' : ''}`
+    : (rejectionReasons.length > 0 ? `${rejectionReasons.length} rejection reason${rejectionReasons.length !== 1 ? 's' : ''}` : '0 alternatives');
+
+  const terminalBadge = isTerminal
+    ? `<div class="node-terminal-badge">◉ Terminal decision</div>`
+    : '';
+
+  wrapper.innerHTML = `
+    <div class="node-card" id="${nodeId}">
+      <div class="node-header">
+        <div class="node-phase-badge" style="color:${color};background:${color}18;border-color:${color}40">
+          <span class="badge-dot"></span>
+          ${escHtml(phaseName(phase))}
+        </div>
+        <div class="node-decision-type">${escHtml(dtLabel)}</div>
+        <div class="node-chosen-label">Chosen</div>
+        <div class="node-chosen-value mono">${escHtml(chosen)}</div>
+        ${terminalBadge}
+      </div>
+      ${constHtml}
+      <div class="node-alternatives" id="${altSectId}" role="region">
+        <button class="alternatives-toggle" onclick="toggleAlternatives('${altSectId}')" aria-expanded="false">
+          <span class="alternatives-toggle-left">
+            <span>Alternatives &amp; reasoning</span>
+            <span class="alt-count-chip">${altCountLabel}</span>
+          </span>
+          <span class="alternatives-chevron">▾</span>
+        </button>
+        <div class="alternatives-body">${altsBodyHtml}</div>
+      </div>
+    </div>
+  `;
+
+  return wrapper;
+}
+
+// ── Toggle handlers ───────────────────────────────────────
+function togglePhase(groupEl) {
+  groupEl.classList.toggle('collapsed');
+  const header = groupEl.querySelector('.phase-header');
+  if (header) {
+    header.setAttribute('aria-expanded', !groupEl.classList.contains('collapsed'));
+  }
+}
+
+function toggleAlternatives(sectId) {
+  const sect = document.getElementById(sectId);
+  if (!sect) return;
+  sect.classList.toggle('alternatives-open');
+  const btn = sect.querySelector('.alternatives-toggle');
+  if (btn) btn.setAttribute('aria-expanded', sect.classList.contains('alternatives-open'));
+}
+
+// ── Helpers ───────────────────────────────────────────────
+function show(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = '';
+}
+
+function hide(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = 'none';
+}
+
+function showError(msg) {
+  hide('loading');
+  hide('dag-view');
+  document.getElementById('error-msg').textContent = msg;
+  show('error-state');
+}
+</script>
+<script src="/sidebar.js"></script>
+</body>
+</html>

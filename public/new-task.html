@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Build — BuildOrbit</title>
+  <link rel="stylesheet" href="/css/buildorbit.css?v=20260426e">
+</head>
+<body class="page-new-task">
+
+<nav>
+  <a href="/" class="logo">
+    <div class="logo-dot"></div>
+    <span>BuildOrbit</span>
+  </a>
+  <div class="nav-actions">
+    <a href="/dashboard" class="nav-link">Dashboard</a>
+    <a href="/auth/logout" class="nav-link">Sign out</a>
+  </div>
+</nav>
+
+<main>
+  <!-- Onboarding welcome banner (shown when ?onboarding=true) -->
+  <div class="onboarding-banner" id="onboardingBanner">
+    <div class="onboarding-banner-row">
+      <span class="onboarding-icon">⚡</span>
+      <div class="onboarding-text">
+        <strong>Your first build is pre-loaded. Hit Run to watch the pipeline execute.</strong>
+        <span>This is a STATIC_SURFACE task — fast, visual, all 6 phases.</span>
+      </div>
+    </div>
+    <div class="onboarding-phases">
+      <span class="phase-badge">Intent Gate</span>
+      <span class="phase-sep">→</span>
+      <span class="phase-badge">Plan</span>
+      <span class="phase-sep">→</span>
+      <span class="phase-badge">Scaffold</span>
+      <span class="phase-sep">→</span>
+      <span class="phase-badge">Code</span>
+      <span class="phase-sep">→</span>
+      <span class="phase-badge">Save</span>
+      <span class="phase-sep">→</span>
+      <span class="phase-badge">Verify</span>
+    </div>
+  </div>
+
+  <!-- Post-first-run credit nudge -->
+  <div class="credit-nudge" id="creditNudge">
+    <span class="credit-nudge-text">That was <strong>1 of your 10 trial credits</strong>. Try your own idea →</span>
+    <button class="credit-nudge-cta" onclick="dismissNudge()">Got it ✓</button>
+  </div>
+
+  <div class="page-header">
+    <div class="header-label">
+      <div class="dot"></div>
+      Pipeline ready
+    </div>
+    <h1>What do you want to build?</h1>
+    <p class="subtitle">Describe your idea. BuildOrbit executes it end-to-end.</p>
+  </div>
+
+  <div class="prompt-area">
+    <div class="prompt-bar">
+      <div class="prompt-bar-left">
+        <div class="prompt-dots">
+          <div class="prompt-dot"></div>
+          <div class="prompt-dot"></div>
+          <div class="prompt-dot"></div>
+        </div>
+        <span class="prompt-bar-title">buildorbit</span>
+      </div>
+      <span class="status-badge">Ready</span>
+    </div>
+    <textarea
+      id="prompt"
+      placeholder="e.g. Build a landing page for a photography studio with a portfolio gallery, about section, and contact form"
+      autofocus
+    ></textarea>
+  </div>
+
+  <div class="error-box" id="errorBox"></div>
+
+  <div class="run-section">
+    <button class="run-btn" id="runBtn" onclick="runPipeline()">
+      <span id="btnText">Run</span>
+      <span id="btnArrow" class="arrow">→</span>
+      <span id="btnSpinner" class="spinner" style="display:none;"></span>
+    </button>
+    <span class="shortcut-hint">⌘ + Enter</span>
+  </div>
+
+  <div class="examples-label">Try an example</div>
+  <div class="examples" id="examples">
+    <button class="example-chip" onclick="useExample(this)">SaaS dashboard with auth</button>
+    <button class="example-chip" onclick="useExample(this)">E-commerce product page</button>
+    <button class="example-chip" onclick="useExample(this)">Portfolio for a designer</button>
+    <button class="example-chip" onclick="useExample(this)">Blog with dark theme</button>
+    <button class="example-chip" onclick="useExample(this)">Restaurant menu app</button>
+    <button class="example-chip" onclick="useExample(this)">Crypto price tracker</button>
+  </div>
+</main>
+
+<!-- AI Prompt Assistant Widget -->
+<div class="ai-widget" id="aiWidget">
+  <div class="ai-chat-panel" id="aiChatPanel">
+    <div class="ai-chat-header">
+      <div class="ai-chat-title">
+        <span>✦</span>
+        <span>Prompt Assistant</span>
+      </div>
+      <button class="ai-chat-close" onclick="closeWidget()" title="Close">✕</button>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-error" id="chatError" style="display:none;"></div>
+    <div class="chat-input-area">
+      <textarea
+        class="chat-input"
+        id="chatInput"
+        placeholder="Describe your idea…"
+        rows="1"
+        onkeydown="handleChatKey(event)"
+        oninput="autoresizeChatInput(this)"
+      ></textarea>
+      <button class="chat-send-btn" id="chatSendBtn" onclick="sendChatMessage()" title="Send">→</button>
+    </div>
+  </div>
+  <button class="ai-trigger-btn" id="aiTriggerBtn" onclick="openWidget()">
+    <span class="ai-trigger-icon">✦</span>
+    <span class="ai-trigger-text">Help me write this</span>
+  </button>
+</div>
+
+<script>
+  const promptEl = document.getElementById('prompt');
+  const runBtn = document.getElementById('runBtn');
+
+  // ── Onboarding detection ───────────────────────────────────────────────────
+  const params = new URLSearchParams(window.location.search);
+  const isOnboarding = params.get('onboarding') === 'true';
+  const showCreditNudge = params.get('first_run_complete') === 'true';
+
+  const ONBOARDING_PROMPT = 'Build a landing page for a photography studio with a portfolio gallery, about section, and contact form';
+
+  const ONBOARDING_CONTEXT = {
+    companyName: 'Photography Studio',
+    targetAudience: 'Local clients looking for professional photography',
+    description: 'A professional photography studio offering portrait, event, and commercial photography services.'
+  };
+
+  if (isOnboarding) {
+    // Pre-fill the photography studio prompt
+    promptEl.value = ONBOARDING_PROMPT;
+    // Show the onboarding welcome banner
+    document.getElementById('onboardingBanner').classList.add('show');
+    // Store flag so run page can show the nudge on return
+    sessionStorage.setItem('bo_onboarding_run', '1');
+  }
+
+  if (showCreditNudge || sessionStorage.getItem('bo_show_credit_nudge') === '1') {
+    document.getElementById('creditNudge').classList.add('show');
+    sessionStorage.removeItem('bo_show_credit_nudge');
+    // Clean the URL so refresh doesn't re-show
+    if (showCreditNudge) {
+      history.replaceState({}, '', '/new-task');
+    }
+  }
+
+  function dismissNudge() {
+    document.getElementById('creditNudge').classList.remove('show');
+  }
+
+  // ── Keyboard shortcut ─────────────────────────────────────────────────────
+  promptEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      runPipeline();
+    }
+  });
+
+  function useExample(btn) {
+    promptEl.value = btn.textContent;
+    promptEl.focus();
+    // Hide onboarding banner if user picks their own example
+    document.getElementById('onboardingBanner').classList.remove('show');
+  }
+
+  async function runPipeline() {
+    const prompt = promptEl.value.trim();
+    if (!prompt || runBtn.disabled) return;
+
+    setLoading(true);
+    hideError();
+
+    try {
+      const payload = { prompt };
+      // For the onboarding task, inject minimal product context
+      if (isOnboarding || sessionStorage.getItem('bo_onboarding_run') === '1') {
+        payload.productContext = ONBOARDING_CONTEXT;
+      }
+
+      const res = await fetch('/api/pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+
+      if (res.status === 401) {
+        window.location.href = '/signup';
+        return;
+      }
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Failed to start the pipeline. Please try again.');
+      }
+
+      // Pass onboarding flag to run page so it can show the credit nudge on completion
+      const runUrl = '/run?id=' + encodeURIComponent(data.id) +
+        (isOnboarding || sessionStorage.getItem('bo_onboarding_run') === '1' ? '&onboarding=true' : '');
+      window.location.href = runUrl;
+    } catch (err) {
+      showError(err.message);
+      setLoading(false);
+    }
+  }
+
+  function setLoading(on) {
+    runBtn.disabled = on;
+    document.getElementById('btnText').textContent = on ? 'Starting…' : 'Run';
+    document.getElementById('btnArrow').style.display = on ? 'none' : 'inline';
+    document.getElementById('btnSpinner').style.display = on ? 'inline-flex' : 'none';
+  }
+
+  function showError(msg) {
+    const box = document.getElementById('errorBox');
+    box.textContent = msg;
+    box.style.display = 'block';
+  }
+
+  function hideError() {
+    document.getElementById('errorBox').style.display = 'none';
+  }
+
+  // ── AI Prompt Assistant Widget ─────────────────────────────────────────────
+  const _chatState = {
+    messages: [],       // [{ role: 'user'|'assistant', content: string }]
+    loading: false,
+    opened: false,
+  };
+
+  const GREETING = 'What are you trying to build? Give me a rough idea and I\'ll help you shape it into a prompt.';
+
+  function openWidget() {
+    const panel = document.getElementById('aiChatPanel');
+    const trigger = document.getElementById('aiTriggerBtn');
+    panel.classList.add('open');
+    trigger.style.display = 'none';
+    if (!_chatState.opened) {
+      _chatState.opened = true;
+      // Show greeting message immediately (no API call needed)
+      _chatState.messages.push({ role: 'assistant', content: GREETING });
+      renderChatMessages();
+    }
+    // Focus the input
+    setTimeout(() => document.getElementById('chatInput').focus(), 80);
+  }
+
+  function closeWidget() {
+    document.getElementById('aiChatPanel').classList.remove('open');
+    document.getElementById('aiTriggerBtn').style.display = '';
+  }
+
+  function handleChatKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  }
+
+  function autoresizeChatInput(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 90) + 'px';
+  }
+
+  async function sendChatMessage() {
+    if (_chatState.loading) return;
+    const inputEl = document.getElementById('chatInput');
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    // Clear input
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    hideChatError();
+
+    // Add user message
+    _chatState.messages.push({ role: 'user', content: text });
+    renderChatMessages();
+    showTypingIndicator();
+    setChatLoading(true);
+
+    try {
+      const res = await fetch('/api/assistant/prompt-help', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: _chatState.messages })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Assistant unavailable.');
+      }
+
+      const reply = data.reply || 'Could not generate a response.';
+      _chatState.messages.push({ role: 'assistant', content: reply });
+    } catch (err) {
+      showChatError(err.message);
+    } finally {
+      setChatLoading(false);
+      removeTypingIndicator();
+      renderChatMessages();
+      scrollChatToBottom();
+    }
+  }
+
+  function setChatLoading(on) {
+    _chatState.loading = on;
+    const sendBtn = document.getElementById('chatSendBtn');
+    const inputEl = document.getElementById('chatInput');
+    sendBtn.disabled = on;
+    inputEl.disabled = on;
+  }
+
+  function showTypingIndicator() {
+    const msgs = document.getElementById('chatMessages');
+    const indicator = document.createElement('div');
+    indicator.className = 'chat-msg assistant';
+    indicator.id = 'typingIndicator';
+    indicator.innerHTML = `<div class="chat-typing"><span></span><span></span><span></span></div>`;
+    msgs.appendChild(indicator);
+    scrollChatToBottom();
+  }
+
+  function removeTypingIndicator() {
+    const indicator = document.getElementById('typingIndicator');
+    if (indicator) indicator.remove();
+  }
+
+  function scrollChatToBottom() {
+    const msgs = document.getElementById('chatMessages');
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function showChatError(msg) {
+    const el = document.getElementById('chatError');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function hideChatError() {
+    const el = document.getElementById('chatError');
+    el.style.display = 'none';
+  }
+
+  // Extract prompt text after "READY PROMPT:\n"
+  function parseReadyPrompt(content) {
+    const match = content.match(/READY PROMPT:\s*\n([\s\S]+)/i);
+    return match ? match[1].trim() : null;
+  }
+
+  function renderChatMessages() {
+    const msgs = document.getElementById('chatMessages');
+    // Keep typing indicator if present (will be re-added by showTypingIndicator)
+    msgs.innerHTML = '';
+
+    _chatState.messages.forEach((msg, idx) => {
+      const isReady = msg.role === 'assistant' && /READY PROMPT:/i.test(msg.content);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'chat-msg ' + msg.role + (isReady ? ' ready-prompt' : '');
+
+      // Clean up display content — remove the "READY PROMPT:\n" marker line for cleaner display
+      let displayContent = msg.content;
+      if (isReady) {
+        displayContent = msg.content.replace(/READY PROMPT:\s*\n/i, '✦ Ready to use:\n');
+      }
+
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble';
+      bubble.textContent = displayContent;
+      wrapper.appendChild(bubble);
+
+      if (isReady) {
+        const readyPromptText = parseReadyPrompt(msg.content);
+        if (readyPromptText) {
+          const applyBtn = document.createElement('button');
+          applyBtn.className = 'apply-prompt-btn';
+          applyBtn.id = 'applyBtn_' + idx;
+          applyBtn.innerHTML = '↑ Apply to prompt';
+          applyBtn.onclick = () => applyToPrompt(readyPromptText, applyBtn);
+          wrapper.appendChild(applyBtn);
+        }
+      }
+
+      msgs.appendChild(wrapper);
+    });
+
+    scrollChatToBottom();
+  }
+
+  function applyToPrompt(text, btn) {
+    promptEl.value = text;
+    promptEl.focus();
+    // Visual feedback
+    btn.textContent = '✓ Applied';
+    btn.classList.add('applied');
+    btn.disabled = true;
+    // Close widget after a beat
+    setTimeout(() => closeWidget(), 700);
+  }
+</script>
+</body>
+</html>
