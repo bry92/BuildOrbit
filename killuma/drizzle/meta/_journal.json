@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1777830950872,
+      "tag": "0000_exotic_lockjaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1777831289917,
+      "tag": "0001_panoramic_forge",
+      "breakpoints": true
+    }
+  ]
+}
