@@ -1,0 +1,9 @@
+/* Minimal custom CSS — Tailwind handles layout, spacing, and typography */
+.btn-primary { border: none; cursor: pointer; }
+.btn-primary:active { transform: scale(0.97); }
+.item-card { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0.875rem 1rem; transition: box-shadow 0.15s; }
+.item-card:hover { box-shadow: 0 1px 6px rgba(0,0,0,0.1); }
+.item-info h3 { font-size: 0.9375rem; font-weight: 600; }
+.item-info p { color: #64748b; font-size: 0.8125rem; margin-top: 0.2rem; }
+.btn-delete { background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 1.1rem; padding: 0.2rem 0.4rem; border-radius: 6px; transition: color 0.15s, background 0.15s; }
+.btn-delete:hover { color: #ef4444; background: rgba(239,68,68,0.08); }
