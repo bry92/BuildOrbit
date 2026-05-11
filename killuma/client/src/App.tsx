@@ -10,17 +10,20 @@ import ImageToVideo from "./pages/ImageToVideo";
 import Studio from "./pages/Studio";
 import Capture from "./pages/Capture";
 import SwarmTraining from "./pages/SwarmTraining";
+import Gallery from "./pages/Gallery";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
       <Route path={"\\"} component={Home} />
-      <Route path="/kill-mode" component={KillMode} />
-      <Route path="/image-to-video" component={ImageToVideo} />
-      <Route path="/studio" component={Studio} />
-      <Route path="/capture" component={Capture} />
-      <Route path="/swarm" component={SwarmTraining} />
+      <Route path="/kill-mode" component={() => <ProtectedRoute><KillMode /></ProtectedRoute>} />
+      <Route path="/image-to-video" component={() => <ProtectedRoute><ImageToVideo /></ProtectedRoute>} />
+      <Route path="/studio" component={() => <ProtectedRoute><Studio /></ProtectedRoute>} />
+      <Route path="/capture" component={() => <ProtectedRoute><Capture /></ProtectedRoute>} />
+      <Route path="/swarm" component={() => <ProtectedRoute><SwarmTraining /></ProtectedRoute>} />
+      <Route path="/gallery" component={() => <ProtectedRoute><Gallery /></ProtectedRoute>} />
       <Route path="/404" component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

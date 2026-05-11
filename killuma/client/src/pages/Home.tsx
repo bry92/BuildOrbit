@@ -145,7 +145,7 @@ export default function Home() {
 
           {/* Video Gallery */}
           <div
-            onClick={() => setLocation("/kill-mode")}
+            onClick={() => setLocation("/gallery")}
             className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 cursor-pointer hover:border-red-600 hover:bg-zinc-800 transition-all group"
           >
             <Video className="text-red-600 mb-4 group-hover:scale-110 transition-transform" size={40} />

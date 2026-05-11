@@ -317,18 +317,25 @@ export async function getVideoCameraControls(videoId: number): Promise<CameraCon
 }
 
 
-export async function getCaptureReconstructionById(id: number): Promise<CaptureReconstruction | undefined> {
-  const db = await getDb();
-  if (!db) return undefined;
-  
-  const result = await db.select().from(captureReconstructions).where(eq(captureReconstructions.id, id)).limit(1);
-  return result[0];
-}
-
 export async function getStudioProjectById(id: number): Promise<StudioProject | undefined> {
   const db = await getDb();
   if (!db) return undefined;
   
   const result = await db.select().from(studioProjects).where(eq(studioProjects.id, id)).limit(1);
+  return result[0];
+}
+
+export async function deleteVideo(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  
+  await db.delete(videos).where(eq(videos.id, id));
+}
+
+export async function getCaptureReconstructionById(id: number): Promise<CaptureReconstruction | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  
+  const result = await db.select().from(captureReconstructions).where(eq(captureReconstructions.id, id)).limit(1);
   return result[0];
 }

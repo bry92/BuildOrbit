@@ -62,27 +62,27 @@
 - [x] Add contribution history
 
 ## Video Gallery
-- [ ] Create gallery page component
-- [ ] Display per-user generated videos
-- [ ] Add video replay functionality
-- [ ] Implement pagination/infinite scroll
-- [ ] Add delete/manage video options
-- [ ] Show video metadata (prompt, date, status)
+- [x] Create gallery page component
+- [x] Display per-user generated videos
+- [x] Add video replay functionality
+- [x] Implement pagination/infinite scroll
+- [x] Add delete/manage video options
+- [x] Show video metadata (prompt, date, status)
 
 ## File Storage Integration
-- [ ] Implement S3 upload for reference images
-- [ ] Implement S3 upload for input videos
-- [ ] Implement S3 upload for generated videos
-- [ ] Add presigned URL generation for downloads
-- [ ] Handle file cleanup/deletion
+- [ ] Implement S3 upload for reference images (via storagePut helper)
+- [ ] Implement S3 upload for input videos (via storagePut helper)
+- [ ] Implement S3 upload for generated videos (via storagePut helper)
+- [ ] Add presigned URL generation for downloads (built-in via /manus-storage/)
+- [ ] Handle file cleanup/deletion (unreferenced files auto-deleted)
 
 ## Job Queue & Status Polling
-- [ ] Create job queue table and model
-- [ ] Implement background job processor
-- [ ] Add status polling endpoint
-- [ ] Implement WebSocket or polling for real-time updates
-- [ ] Handle job timeout and retry logic
-- [ ] Track full lifecycle: deploying → processing → complete/failed
+- [x] Create job queue table and model (jobs table in schema)
+- [ ] Implement background job processor (server/jobs.ts - placeholder, needs real worker)
+- [x] Add status polling endpoint (killMode.getStatus, capture.getStatus)
+- [x] Implement WebSocket or polling for real-time updates (useQuery with refetchInterval)
+- [ ] Handle job timeout and retry logic (error handling in processors - basic only)
+- [ ] Track full lifecycle: deploying → processing → complete/failed (status enum - UI ready, worker incomplete)
 
 ## UI/UX & Styling
 - [ ] Ensure consistent dark theme (zinc-950 backgrounds)
@@ -103,7 +103,7 @@
 - [x] Set up routes for all pages
 - [x] Create main navigation menu
 - [x] Add breadcrumbs or navigation context
-- [ ] Implement protected route guards
+- [x] Implement protected route guards
 - [x] Add 404 and error pages
 
 ## Deployment & Final

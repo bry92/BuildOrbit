@@ -313,6 +313,31 @@ export const appRouter = router({
         return { success: true };
       }),
   }),
+
+  // Gallery - Video Management
+  gallery: router({
+    getVideos: protectedProcedure
+      .input(z.object({
+        page: z.number().default(1),
+        limit: z.number().default(12),
+      }))
+      .query(async ({ input, ctx }) => {
+        const offset = (input.page - 1) * input.limit;
+        return db.getUserVideos(ctx.user.id, input.limit, offset);
+      }),
+
+    deleteVideo: protectedProcedure
+      .input(z.object({ videoId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const video = await db.getVideoById(input.videoId);
+        if (!video || video.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        await db.deleteVideo(input.videoId);
+        return { success: true };
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;
