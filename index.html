@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Improve Bry92/buildorbit</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-indigo-600 text-white py-6 px-6 shadow-lg">
+    <div class="max-w-3xl mx-auto flex items-center gap-3">
+      <span class="text-2xl">✨</span>
+      <h1 class="text-2xl font-bold tracking-tight">Improve Bry92/buildorbit</h1>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 py-10 flex flex-col gap-6">
+
+    <!-- Add Section -->
+    <section class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4">New item</h2>
+      <div class="flex flex-col gap-3">
+        <input type="text" id="field_name" placeholder="Name..." required autocomplete="off" class="flex-1 min-w-36 px-4 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all" />
+        <input type="text" id="field_description" placeholder="Description (optional)..."  autocomplete="off" class="flex-1 min-w-36 px-4 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all" />
+        <button id="addBtn" class="self-start px-6 py-2.5 bg-indigo-600 hover:opacity-90 text-white font-semibold text-sm rounded-xl transition-all duration-200 hover:shadow-md active:scale-95 whitespace-nowrap">Add</button>
+      </div>
+      <div id="formError" class="mt-2 text-red-500 text-sm" style="display:none"></div>
+    </section>
+
+    <!-- List Section -->
+    <section class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4">Items <span id="countBadge" class="inline-block bg-indigo-600 text-white text-xs font-bold rounded-full px-2 py-0.5 ml-1 align-middle">0</span></h2>
+
+      <div id="itemList" class="flex flex-col gap-2.5"></div>
+      <div id="emptyState" class="text-center py-10 text-gray-400 text-sm">
+        <p>✨ Nothing here yet. Add your first item above!</p>
+      </div>
+    </section>
+
+  </main>
+  <div style="text-align:center;padding:12px 0 8px"><a href="https://buildorbit.polsia.app" target="_blank" rel="noopener" style="font-size:0.75rem;color:#9ca3af;text-decoration:none">Built with 🛞 BuildOrbit</a></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
